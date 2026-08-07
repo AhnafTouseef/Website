@@ -13,17 +13,17 @@
         <p>Belajar.id started because we wanted a different path: cohort-based learning, real projects, and mentors who answer questions in a way fellow students understand.</p>
         <p>We built this platform for affordable, career-relevant study that fits modern student life — with clear steps, practical tools, and a supportive community.</p>
     </div>
-    <div class="founder-grid">
-        <div class="founder-photo-large">R</div>
-        <div class="founder-photo-large">D</div>
-        <p class="photo-caption">Rizky & Dinda — Co-founders · Jakarta, 2024</p>
+    <div class="founder-photos">
+        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author1.png') }}" alt="Ahnaf"></div>
+        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author2.jpg') }}" alt="Shumon"></div>
+        <p class="photo-caption">Ahnaf & Shumon — Co-founders · Jashore, 2026</p>
     </div>
 </section>
 
 <section class="container team-section grid-2">
     {% for member in team_members %}
     <div class="team-card white-card">
-        <div class="avatar large">{{ member.avatar }}</div>
+        <!-- <div class="avatar large">{{ member.avatar }}</div> -->
         <h3>{{ member.name }}</h3>
         <p class="team-role">{{ member.role }}</p>
         <p>{{ member.bio }}</p>

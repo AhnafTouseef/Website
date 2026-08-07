@@ -14,7 +14,9 @@
         <span class="status-text">Available Now</span>
     </div>
     <div class="pipeline-card active-course-card">
-        <div class="course-editor-graphic"></div>
+        <div class="course-editor-graphic">
+            <img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="Python for Beginners" />
+        </div>
         <div class="course-info">
             <span class="pill-tag">{{ active_course.tagline }}</span>
             <h2>{{ active_course.title }}</h2>

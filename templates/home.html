@@ -12,7 +12,7 @@
             </div>
         </div>
         <div class="hero-visual">
-            <div class="hero-photo"></div>
+            <div class="hero-photo"><img src="{{ url_for('static', filename='webinar.jpg') }}" alt="webinar", height=340rem></div>
             <div class="hero-card">
                 <h3 class="hero-card-label">Next webinar session</h3>
                 <p>Saturday, July 12 · 10:00 AM </p>
@@ -35,9 +35,9 @@
         <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
     </div>
     <div class="course-card grid-2">
-        <div class="course-image"></div>
+        <div class="course-image"><img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="python" height="350"></div>
         <div class="course-details">
-            <span class="pill-tag">Now Available</span>
+            <span class="pill-tag">🟢 Now Available</span>
             <h3>{{ active_course.title }}</h3>
             <p>{{ active_course.subtitle }}</p>
             <div class="course-meta">
@@ -87,9 +87,12 @@
         <a class="button button-secondary" href="{{ url_for('about') }}">Read the Full Story</a>
     </div>
     <div class="founder-photos">
-        <div class="founder-photo">R</div>
-        <div class="founder-photo">D</div>
-        <p class="photo-caption">Rizky & Dinda — Co-founders · Jakarta, 2024</p>
+        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author1.png') }}" alt="Ahnaf">
+</div>
+        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author2.jpg') }}" alt="Shumon">
+</div>
+
+        <p class="photo-caption">Ahnaf & Shumon — Co-founders · Jashore, 2026</p>
     </div>
 </section>
 {% endblock %}

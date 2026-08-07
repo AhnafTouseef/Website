@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Belajar.id | Practical Student Learning</title>
+    <title>Practical Student Learning</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}" />
 </head>
@@ -17,8 +17,11 @@
     <header class="site-header">
         <div class="container header-inner">
             <a class="brand" href="{{ url_for('home') }}">
+                {% if logo %}
+                <img src="{{ url_for('static', filename=('logo/' ~ logo)) }}" alt="Belajar.id" class="brand-mark site-logo" />
+                {% else %}
                 <span class="brand-mark">📘</span>
-                <span class="brand-text">Belajar.id</span>
+                {% endif %}
             </a>
 
             <button class="mobile-menu-toggle" aria-controls="mobile-nav" aria-expanded="false" aria-label="Toggle menu">
@@ -63,8 +66,11 @@
         <div class="container footer-grid">
             <div>
                 <div class="footer-brand">
+                    {% if logo %}
+                    <img src="{{ url_for('static', filename=('logo/' ~ logo)) }}" alt="Belajar.id" class="brand-mark site-logo" />
+                    {% else %}
                     <span class="brand-mark">📘</span>
-                    <span class="brand-text">Belajar.id</span>
+                    {% endif %}
                 </div>
                 <p class="footer-tagline">A learning platform built by graduates, for students. We're just getting started — and we're excited to grow with you.</p>
             </div>
@@ -80,17 +86,17 @@
             </div>
             <div>
                 <h3>Get in Touch</h3>
-                <p>hello@belajar.id</p>
-                <p>Jakarta, Indonesia</p>
+                <p>example@example.com</p>
+                <p>Jashore, Bangladesh</p>
                 <div class="social-icons">
                     <a href="#" aria-label="Instagram">IG</a>
                     <a href="#" aria-label="LinkedIn">LI</a>
-                    <a href="mailto:hello@belajar.id" aria-label="Email">✉️</a>
+                    <a href="mailto:example@example.com" aria-label="Email">✉️</a>
                 </div>
             </div>
         </div>
         <div class="footer-bottom">
-            <p>© 2024 Belajar.id — Founding Batch</p>
+            <p>© 2026 Founding Batch</p>
             <p>Built with 💙 by two fresh grads</p>
         </div>
     </footer>

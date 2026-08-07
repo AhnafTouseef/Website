@@ -14,14 +14,12 @@
             </div>
             <div class="hero-actions">
                 <a class="button button-primary" href="{{ url_for('faq') }}">Enroll — {{ active_course.price }} →</a>
-                <a class="text-link" href="{{ url_for('webinar') }}">Try free webinar first</a>
+                <a class="text-link" href="{{ url_for('webinar') }}">Try free webinar first→</a>
             </div>
         </div>
         <div class="hero-visual course-hero-media">
             <div class="course-media-card">
-                <div class="code-line"></div>
-                <div class="code-block"></div>
-                <div class="code-line short"></div>
+                <img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="Python for Beginners" height=320rem/>
             </div>
         </div>
     </div>
@@ -65,7 +63,7 @@
         <div class="team-grid">
             {% for member in team_members %}
             <div class="team-card">
-                <div class="avatar">{{ member.avatar }}</div>
+                <!-- <div class="avatar">{{ member.avatar }}</div> -->
                 <h3>{{ member.name }}</h3>
                 <p class="team-role">{{ member.role }}</p>
                 <p>{{ member.bio }}</p>

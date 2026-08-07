@@ -10,6 +10,7 @@
     --accent-dark: #f59e0b;
     --border: #e5e7eb;
     --shadow: 0 18px 70px rgba(20, 23, 83, 0.12);
+    --radius-lg: 1.5rem;
 }
 
 * {
@@ -28,6 +29,7 @@ body {
 img {
     max-width: 100%;
     display: block;
+    border-radius: 1.5rem;
 }
 
 a {
@@ -38,6 +40,13 @@ a {
 button, input, textarea {
     font: inherit;
 }
+
+.text-link {
+    padding-top: 1rem;
+    text-decoration: underline;
+    text-underline-offset: 5px;
+}
+
 
 .container {
     width: min(1140px, calc(100% - 2rem));
@@ -85,6 +94,21 @@ button, input, textarea {
     border-radius: 0.85rem;
     color: #ffffff;
     font-size: 1.1rem;
+}
+
+/* Logo image used in navbar/footer when present
+   Allow natural aspect ratio; constrain by max-height so large horizontal logos
+   (e.g. 727x164) render clearly while fitting the header/footer.
+*/
+.site-logo {
+    width: auto;
+    height: auto;
+    max-height: 64px; /* allow generous height for full-clarity logos */
+    max-width: 100%;
+    object-fit: contain;
+    display: inline-block;
+    vertical-align: middle;
+    border-radius: 0.25rem;
 }
 
 .nav-links {
@@ -215,7 +239,7 @@ button, input, textarea {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0);
     padding: 0.6rem 0.95rem;
     border-radius: 999px;
     font-size: 0.95rem;
@@ -360,22 +384,22 @@ button, input, textarea {
 .skills-card,
 .contact-card,
 .pricing-card {
-    min-height: 260px;
+    min-height: 100px;
 }
 
 .course-image {
     background: linear-gradient(135deg, #0f173c, #1b1f69);
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: center;    
 }
 
-.course-image::before {
+/* .course-image::before {
     content: "< code />";
     color: #f8fafc;
     font-size: 1.4rem;
     font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-}
+} */
 
 .course-details {
     padding: 2rem;
@@ -485,8 +509,30 @@ button, input, textarea {
     place-items: center;
     font-size: 2rem;
     font-weight: 700;
-    border-radius: 1.5rem;
+    border-radius: var(--radius-lg);
     min-height: 220px;
+}
+
+/* Portrait frame container for founder photos */
+.founder-photo {
+    overflow: hidden;
+    aspect-ratio: 3 / 4;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* Image fills the frame with cover fit and center alignment */
+.founder-photo img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+    filter: grayscale(15%) contrast(1.05);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.55);
 }
 
 .photo-caption {
@@ -542,6 +588,14 @@ button, input, textarea {
 .course-editor-graphic {
     background: linear-gradient(180deg, #0f173c, #1b1f69);
     position: relative;
+    overflow: hidden;
+}
+
+.course-editor-graphic img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .course-editor-graphic::before {
@@ -550,6 +604,7 @@ button, input, textarea {
     inset: 1.5rem;
     background: linear-gradient(90deg, rgba(255,255,255,0.12), transparent 35%), radial-gradient(circle at top left, rgba(229, 161, 23, 0.15), transparent 28%);
     border-radius: 1.2rem;
+    pointer-events: none;
 }
 
 .course-info {
@@ -587,7 +642,7 @@ button, input, textarea {
 .course-media-card,
 .webinar-screen {
     background: linear-gradient(135deg, #0f173c, #1b1f69);
-    padding: 2rem;
+    /* padding: 2rem; */
     border-radius: 1.75rem;
     box-shadow: var(--shadow);
     min-height: 320px;
@@ -717,6 +772,39 @@ button, input, textarea {
 .pricing-card h2 {
     margin: 0.5rem 0 0.3rem;
     font-size: 2.4rem;
+}
+
+/* Improve pricing card layout: use column flex, consistent gaps, and centered price */
+.pricing-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    align-items: center; /* center headline and CTA visually */
+    text-align: center;
+    margin-top: 5rem;
+    margin-bottom: 5rem;
+}
+
+.pricing-card .section-label {
+    display: inline-block;
+    margin-bottom: 0;
+}
+
+.pricing-card .feature-list {
+    width: 100%;
+    text-align: left;
+    padding-left: 1.25rem;
+}
+
+.pricing-card .subtle {
+    margin-bottom: 0;
+}
+
+.pricing-card .sidebar-note {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-top: 0.6rem;
+    text-align: center;
 }
 
 .subtle {

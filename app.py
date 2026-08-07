@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash
+import os
+import random
 
 app = Flask(__name__)
 app.secret_key = "change-me-to-a-secure-key"
@@ -9,7 +11,7 @@ active_course = {
     "duration": "8 Weeks",
     "capacity": "Max 30 Students",
     "certificate": "Certificate",
-    "price": "Rp 799.000",
+    "price": "Tk 500.00",
     "status": "Available Now",
     "tagline": "Enrolling Now · Cohort 1",
     "start_date": "July 21, 2024",
@@ -22,12 +24,12 @@ active_course = {
 }
 
 pipeline_courses = [
-    {"title": "Data Analytics with Python", "estimate": "Est. Q3 2024", "icon": "📊"},
-    {"title": "Web Development (HTML/CSS/JS)", "estimate": "Est. Q4 2024", "icon": "🌐"},
-    {"title": "UI/UX Design Fundamentals", "estimate": "Est. Q4 2024", "icon": "🎨"},
-    {"title": "Digital Marketing & SEO", "estimate": "Est. 2025", "icon": "📣"},
-    {"title": "Excel & Google Sheets for Work", "estimate": "Est. 2025", "icon": "🧮"},
-    {"title": "Public Speaking & Communication", "estimate": "Est. 2025", "icon": "🎤"}
+    {"title": "Data Analytics with Python", "estimate": "Est. Q4 2026", "icon": "📊"},
+    {"title": "Web Development (HTML/CSS/JS)", "estimate": "Est. Q4 2026", "icon": "🌐"},
+    {"title": "UI/UX Design Fundamentals", "estimate": "Est. Q4 2026", "icon": "🎨"},
+    {"title": "Digital Marketing & SEO", "estimate": "Est. 2027", "icon": "📣"},
+    {"title": "Excel & Google Sheets for Work", "estimate": "Est. 2027", "icon": "🧮"},
+    {"title": "Public Speaking & Communication", "estimate": "Est. 2027", "icon": "🎤"}
 ]
 
 faq_questions = [
@@ -43,18 +45,39 @@ faq_questions = [
 
 team_members = [
     {
-        "name": "Rizky Pratama",
+        "name": "Ahnaf Tauseef Khan",
         "role": "Co-Founder & Lead Instructor",
-        "bio": "B.Sc. Computer Science — BINUS University. Former fintech engineer who built Python pipelines and automation systems.",
+        "bio": "B.Sc. Petroleum and Mining Engineering — Jashore University of Science and Technology. Self taught developer who built Python pipelines and automation systems.",
         "avatar": "R"
     },
     {
-        "name": "Dinda Kartika",
+        "name": "Sadman Sakib Shumon",
         "role": "Co-Founder & Co-Instructor",
-        "bio": "B.Sc. Statistics — Universitas Indonesia. Experienced in data analytics consulting and practical reporting workflows.",
+        "bio": "B.Sc. Petroleum and Mining Engineering — Jashore University of Science and Technology. Experienced in data analytics consulting and practical reporting workflows.",
         "avatar": "D"
     }
 ]
+
+
+@app.context_processor
+def inject_random_logo():
+    """Inject a random logo filename from static/logo into all templates as `logo`.
+
+    Falls back to a sensible name if the folder is missing or empty.
+    """
+    logos_dir = os.path.join(app.static_folder or 'static', 'logo')
+    try:
+        files = [f for f in os.listdir(logos_dir) if os.path.splitext(f)[1].lower() in ('.png', '.jpg', '.jpeg', '.svg', '.webp', '.gif')]
+    except Exception:
+        files = []
+
+    if files:
+        chosen = random.choice(files)
+    else:
+        # sensible default; templates should handle missing file gracefully
+        chosen = ''
+
+    return {'logo': chosen}
 
 curriculum = [
     {"week_range": "Week 1–2: Python Basics", "details": ["Variables & data types", "Control flow", "Functions", "Debugging"]},
@@ -121,4 +144,4 @@ def faq():
     return render_template("faq.html", faq_questions=faq_questions)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
