@@ -99,6 +99,7 @@ button, input, textarea {
 /* Logo image used in navbar/footer when present
    Allow natural aspect ratio; constrain by max-height so large horizontal logos
    (e.g. 727x164) render clearly while fitting the header/footer.
+   Transparent background so the logo displays cleanly.
 */
 .site-logo {
     width: auto;
@@ -109,6 +110,7 @@ button, input, textarea {
     display: inline-block;
     vertical-align: middle;
     border-radius: 0.25rem;
+    background: transparent !important;
 }
 
 .nav-links {
