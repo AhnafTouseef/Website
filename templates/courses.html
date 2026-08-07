@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-intro light-section">
+    <div class="container intro-copy">
+        <span class="section-label">COURSE CATALOG</span>
+        <h1>All Courses</h1>
+        <p>We're launching with one focused course and growing fast. Watch this space — new courses drop every quarter.</p>
+    </div>
+</section>
+
+<section class="container active-course-section">
+    <div class="status-row">
+        <span class="status-dot"></span>
+        <span class="status-text">Available Now</span>
+    </div>
+    <div class="pipeline-card active-course-card">
+        <div class="course-editor-graphic"></div>
+        <div class="course-info">
+            <span class="pill-tag">{{ active_course.tagline }}</span>
+            <h2>{{ active_course.title }}</h2>
+            <p>{{ active_course.subtitle }}</p>
+            <div class="course-meta">{{ active_course.duration }} | {{ active_course.capacity }} | {{ active_course.certificate }}</div>
+            <div class="course-footer">
+                <span class="course-price">{{ active_course.price }}</span>
+                <a class="button button-primary" href="{{ url_for('course_details') }}">View Curriculum →</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="container pipeline-section">
+    <div class="section-header center">
+        <h2>In The Pipeline</h2>
+        <p>Upcoming learning tracks with release windows so you can plan your next step.</p>
+    </div>
+    <div class="pipeline-grid pipeline-grid-3">
+        {% for course in pipeline_courses %}
+        <div class="pipeline-card pipeline-small">
+            <div class="pipeline-icon">{{ course.icon }}</div>
+            <h4>{{ course.title }}</h4>
+            <p>{{ course.estimate }}</p>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

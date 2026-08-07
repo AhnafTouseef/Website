@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-intro light-section">
+    <div class="container intro-copy">
+        <span class="section-label">OUR STORY</span>
+        <h1>We Built the Platform We Wish We Had</h1>
+    </div>
+</section>
+
+<section class="container grid-2 about-story">
+    <div>
+        <p>In 2023, we graduated with strong grades but not enough practical experience. University courses were full of theory, and we struggled to translate lectures into real code.</p>
+        <p>Belajar.id started because we wanted a different path: cohort-based learning, real projects, and mentors who answer questions in a way fellow students understand.</p>
+        <p>We built this platform for affordable, career-relevant study that fits modern student life — with clear steps, practical tools, and a supportive community.</p>
+    </div>
+    <div class="founder-grid">
+        <div class="founder-photo-large">R</div>
+        <div class="founder-photo-large">D</div>
+        <p class="photo-caption">Rizky & Dinda — Co-founders · Jakarta, 2024</p>
+    </div>
+</section>
+
+<section class="container team-section grid-2">
+    {% for member in team_members %}
+    <div class="team-card white-card">
+        <div class="avatar large">{{ member.avatar }}</div>
+        <h3>{{ member.name }}</h3>
+        <p class="team-role">{{ member.role }}</p>
+        <p>{{ member.bio }}</p>
+    </div>
+    {% endfor %}
+</section>
+
+<section class="container values-section">
+    <div class="section-header center">
+        <h2>What We Stand For</h2>
+    </div>
+    <div class="values-grid">
+        <div class="value-card">
+            <div class="value-icon">🎓</div>
+            <h4>Student-First</h4>
+            <p>Affordable pricing for university students with no hidden fees.</p>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">⚙️</div>
+            <h4>Practical Focus</h4>
+            <p>Zero theoretical fluff; actionable code applied within the week.</p>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">🌱</div>
+            <h4>Growing With You</h4>
+            <p>Building in public, shaped directly by student feedback.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

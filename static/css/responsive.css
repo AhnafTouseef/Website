@@ -1,0 +1,120 @@
+/* Responsive overrides for phone and narrow screens */
+@media (max-width: 980px) {
+    .hero-grid,
+    .grid-2,
+    .pipeline-grid,
+    .pipeline-grid-3,
+    .steps-grid,
+    .team-grid,
+    .values-grid,
+    .about-story,
+    .webinar-content,
+    .faq-page,
+    .footer-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .site-header .container {
+        width: min(1140px, calc(100% - 1rem));
+    }
+
+    .header-inner {
+        flex-wrap: wrap;
+        justify-content: space-between;
+        width: 100%;
+        padding: 1rem 0.5rem;
+    }
+
+    .nav-links {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    /* Mobile hamburger: hide desktop nav and show toggle */
+    .mobile-menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        border: none;
+        color: var(--nav-strong);
+        padding: 0.4rem;
+        margin-left: 0.5rem;
+        cursor: pointer;
+        font-size: 1.2rem;
+    }
+
+    .nav-links {
+        display: none;
+    }
+
+    .site-header .button.button-pill {
+        display: none;
+    }
+
+    .mobile-nav {
+        display: block;
+        position: absolute;
+        left: 1rem;
+        right: 1rem;
+        top: calc(100% + 0.5rem);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: var(--shadow);
+        z-index: 40;
+    }
+
+    .mobile-nav[hidden] { display: none; }
+
+    .mobile-nav a {
+        display: block;
+        padding: 0.6rem 0;
+        color: var(--nav-strong);
+        font-weight: 700;
+        border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+
+    .mobile-nav a.enroll-mobile {
+        display: block;
+        margin-top: 0.6rem;
+    }
+
+    .hero-visual .hero-card {
+        position: static;
+        margin-top: -3rem;
+    }
+
+    .hero-card,
+    .course-editor-graphic,
+    .hero-photo {
+        min-height: 220px;
+    }
+}
+
+@media (max-width: 640px) {
+    .hero-actions,
+    .hero-card,
+    .course-footer,
+    .event-specs,
+    .course-meta-list,
+    .timeline-list {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .nav-links {
+        gap: 1rem;
+    }
+
+    .button {
+        width: 100%;
+    }
+
+    .hero-copy h1,
+    .section-header h2,
+    .page-intro h1 {
+        font-size: 2rem;
+    }
+}

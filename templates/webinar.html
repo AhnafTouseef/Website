@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-dark webinar-hero">
+    <div class="container hero-grid">
+        <div class="hero-copy">
+            <span class="pill-tag">Free · No Commitment Required</span>
+            <h1>Python Kickoff Webinar — Meet Us Before You Enroll</h1>
+            <p>Join an hour-long live preview to see how our course works, experience a live coding demo, and ask questions before signing up.</p>
+            <div class="event-specs">
+                <div>📅 Saturday, July 12, 2024</div>
+                <div>⏰ 10:00 – 11:00 AM WIB</div>
+                <div>📹 Zoom (link sent on registration)</div>
+                <div>👥 Limited to 100 participants</div>
+            </div>
+        </div>
+        <div class="hero-visual webinar-media">
+            <div class="webinar-screen"></div>
+        </div>
+    </div>
+</section>
+
+<section class="container grid-2 webinar-content">
+    <div>
+        <div class="section-header">
+            <h2>What We'll Cover</h2>
+        </div>
+        <div class="timeline-list">
+            <div><span>10:00</span> Welcome & Introductions</div>
+            <div><span>10:10</span> Course Walkthrough</div>
+            <div><span>10:30</span> Live Demo (Writing a small Python script live)</div>
+            <div><span>10:45</span> Q&A Session</div>
+            <div><span>10:58</span> Enrollment Offer</div>
+        </div>
+    </div>
+    <div class="registration-card">
+        <div class="section-header">
+            <h2>Reserve Your Spot</h2>
+        </div>
+        <form method="post" class="form-card">
+            <label>Full Name<input type="text" name="full_name" placeholder="Full Name" required></label>
+            <label>Email Address<input type="email" name="email" placeholder="Email Address" required></label>
+            <label>University<input type="text" name="university" placeholder="University"></label>
+            <label>Faculty / Major<input type="text" name="major" placeholder="Faculty / Major"></label>
+            <button type="submit" class="button button-primary full-width">Register for Free →</button>
+            <p class="form-note">No spam. Zoom link only. Unsubscribe any time.</p>
+        </form>
+    </div>
+</section>
+{% endblock %}

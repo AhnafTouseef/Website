@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-intro light-section">
+    <div class="container intro-copy">
+        <span class="section-label">CONTACT & FAQ</span>
+        <h1>Got Questions?</h1>
+        <p>We actually read and reply to every message. Usually within a few hours.</p>
+    </div>
+</section>
+
+<section class="container grid-2 faq-page">
+    <div>
+        <div class="sect-header">
+            <h2>Frequently Asked</h2>
+        </div>
+        <div class="accordion">
+            {% for item in faq_questions %}
+            <div class="accordion-item {% if loop.first %}open{% endif %}">
+                <button type="button" class="accordion-summary">{{ item.question }}</button>
+                <div class="accordion-panel">
+                    <p>{{ item.answer }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="contact-card">
+        <div class="sect-header">
+            <h2>Send Us a Message</h2>
+        </div>
+        <form method="post" class="form-card">
+            <label>Name<input type="text" name="name" placeholder="Name" required></label>
+            <label>Email<input type="email" name="email" placeholder="Email" required></label>
+            <label>Message<textarea name="message" rows="6" placeholder="Ask anything — pricing, curriculum, whether Python is right for you, anything." required></textarea></label>
+            <button type="submit" class="button button-primary full-width">💬 Send Message</button>
+        </form>
+        <div class="contact-list">
+            <p><strong>Email</strong>: hello@belajar.id</p>
+            <p><strong>Instagram</strong>: @belajar.id</p>
+            <p><strong>LinkedIn</strong>: Belajar.id</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

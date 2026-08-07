@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-dark">
+    <div class="container hero-grid">
+        <div class="hero-copy">
+            <div class="hero-badge">✨ First Cohort · Python Programming</div>
+            <h1>Learn Skills That <span class="hero-emphasis">Actually</span> Matter</h1>
+            <p>We're two recent graduates who believe practical skills shouldn't cost a fortune or take years to acquire. Join a cohort that teaches real-world Python for students ready to build projects and launch faster.</p>
+            <div class="hero-actions">
+                <a class="button button-primary" href="{{ url_for('course_details') }}">Explore the Course →</a>
+                <a class="button button-outline" href="{{ url_for('webinar') }}">Join Free Webinar</a>
+            </div>
+        </div>
+        <div class="hero-visual">
+            <div class="hero-photo"></div>
+            <div class="hero-card">
+                <h3 class="hero-card-label">Next webinar session</h3>
+                <p>Saturday, July 12 · 10:00 AM </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- <section class="stats-bar container stats-grid">
+    <div class="stat-card"><strong>1</strong> Course Available</div>
+    <div class="stat-card"><strong>2</strong> Expert Instructors</div>
+    <div class="stat-card"><strong>Free</strong> Intro Webinar</div>
+    <div class="stat-card"><strong>∞</strong> Future Courses</div>
+</section> -->
+
+<section class="container featured-course">
+    <div class="section-header">
+        <p class="section-label">Featured Course</p>
+        <h2>Python for Beginners: From Zero to Real Projects</h2>
+        <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
+    </div>
+    <div class="course-card grid-2">
+        <div class="course-image"></div>
+        <div class="course-details">
+            <span class="pill-tag">Now Available</span>
+            <h3>{{ active_course.title }}</h3>
+            <p>{{ active_course.subtitle }}</p>
+            <div class="course-meta">
+                <span>{{ active_course.duration }}</span>
+                <span>{{ active_course.capacity }}</span>
+                <span>{{ active_course.certificate }}</span>
+            </div>
+            <div class="course-footer">
+                <span class="course-price">{{ active_course.price }}</span>
+                <a class="button button-secondary" href="{{ url_for('course_details') }}">See Full Curriculum →</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="container pipeline-section">
+    <div class="section-header center">
+        <h2>More Courses Are Coming</h2>
+        <p>We are building a full pipeline of student-friendly programs designed to grow with your interests.</p>
+    </div>
+    <div class="pipeline-grid">
+        {% for course in pipeline_courses[:4] %}
+        <div class="pipeline-card">
+            <span class="pill-tag">Coming Soon</span>
+            <h4>{{ course.title }}</h4>
+        </div>
+        {% endfor %}
+    </div>
+    <p class="micro-copy">Want to suggest a course topic? Let us know →</p>
+</section>
+
+<section class="webinar-banner">
+    <div class="container webinar-callout">
+        <div>
+            <h2>Ready to meet us live?</h2>
+            <p>Reserve a free seat in the intro webinar and see the course before you enroll.</p>
+        </div>
+        <a class="button button-primary" href="{{ url_for('webinar') }}">Register for Free →</a>
+    </div>
+</section>
+
+<section class="container founder-preview grid-2">
+    <div>
+        <p class="section-label">Two Graduates Who Learned the Hard Way</p>
+        <h2>We built the class we wished we had in university.</h2>
+        <p>From theory-heavy lectures to practical, project-oriented learning — our mission is to give students the confidence and guidance we wanted when we were starting out.</p>
+        <a class="button button-secondary" href="{{ url_for('about') }}">Read the Full Story</a>
+    </div>
+    <div class="founder-photos">
+        <div class="founder-photo">R</div>
+        <div class="founder-photo">D</div>
+        <p class="photo-caption">Rizky & Dinda — Co-founders · Jakarta, 2024</p>
+    </div>
+</section>
+{% endblock %}
