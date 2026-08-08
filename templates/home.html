@@ -12,10 +12,11 @@
             </div>
         </div>
         <div class="hero-visual">
-            <div class="hero-photo"><img src="{{ url_for('static', filename='webinar.jpg') }}" alt="webinar", height=340rem></div>
+            <div class="hero-photo"><img src="{{ url_for('static', filename='webinar.jpg') }}" alt="webinar">
             <div class="hero-card">
                 <h3 class="hero-card-label">Next webinar session</h3>
                 <p>Saturday, July 12 · 10:00 AM </p>
+            </div>
             </div>
         </div>
     </div>
@@ -35,7 +36,7 @@
         <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
     </div>
     <div class="course-card grid-2">
-        <div class="course-image"><img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="python" height="350"></div>
+        <div class="course-image"><img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="python"></div>
         <div class="course-details">
             <span class="pill-tag">🟢 Now Available</span>
             <h3>{{ active_course.title }}</h3>

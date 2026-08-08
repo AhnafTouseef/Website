@@ -13,6 +13,10 @@
     --radius-lg: 1.5rem;
 }
 
+html {
+    font-size: 92%;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -29,6 +33,7 @@ body {
 img {
     max-width: 100%;
     display: block;
+    height: auto;
     border-radius: 1.5rem;
 }
 
@@ -65,7 +70,7 @@ button, input, textarea {
     position: sticky;
     top: 0;
     z-index: 20;
-    border-bottom: 1px solid #e5e7eb;
+    /* border-bottom: 1px solid #e5e7eb; */
 }
 
 .header-inner {
@@ -73,7 +78,7 @@ button, input, textarea {
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1rem 0;
+    /* padding: 1rem 0; */
 }
 
 .brand {
@@ -171,9 +176,9 @@ button, input, textarea {
     color: var(--surfacemuted-muted);
 }
 
-.page-content {
+/* .page-content {
     padding-top: 1.5rem;
-}
+} */
 
 .hero {
     padding: 4rem 0;
@@ -218,7 +223,7 @@ button, input, textarea {
 .page-intro h1,
 .faq-page h1 {
     margin: 1rem 0 1rem;
-    font-size: clamp(2rem, 2.7vw, 3.4rem);
+    font-size: clamp(1.8rem, 2.4vw, 3rem);
     line-height: 1.05;
 }
 
@@ -253,7 +258,6 @@ button, input, textarea {
 .event-specs,
 .stats-bar,
 .founder-photos,
-.webinar-callout,
 .pricing-card,
 .form-card {
     display: flex;
@@ -270,23 +274,34 @@ button, input, textarea {
 }
 
 .hero-photo {
+    position: relative;
     min-height: 340px;
     border-radius: 2rem;
     background: linear-gradient(135deg, #192164, #1b1f69 55%, #0f1438);
     box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.hero-photo img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 1.5rem;
 }
 
 .hero-card {
     position: absolute;
-    right: 5;
-    bottom: 1rem;
+    left: 1rem;
+    right: 1rem;
+    bottom: 10px;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255,255,255,0.18);
     backdrop-filter: blur(14px);
     border-radius: 1.5rem;
     padding: 1.5rem;
-    width: min(450px, 100%);
-    height: 100px;
+    width: auto;
+    max-width: calc(100% - 2rem);
+    height: auto;
 }
 
 .hero-card-label {
@@ -392,8 +407,16 @@ button, input, textarea {
 .course-image {
     background: linear-gradient(135deg, #0f173c, #1b1f69);
     display: flex;
-    align-items: center;
+    /* align-items: center; */
     justify-content: center;    
+    overflow: hidden;
+}
+
+.course-image img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 1.5rem;
 }
 
 /* .course-image::before {
@@ -427,7 +450,7 @@ button, input, textarea {
 }
 
 .pipeline-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .pipeline-grid-3 {
@@ -486,9 +509,10 @@ button, input, textarea {
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    gap: 1rem;
 }
 
-.webinar-callout h2 {
+h2 {
     margin: 0 0 0.5rem;
 }
 
@@ -588,25 +612,16 @@ button, input, textarea {
 }
 
 .course-editor-graphic {
-    background: linear-gradient(180deg, #0f173c, #1b1f69);
     position: relative;
     overflow: hidden;
+    border-radius: 1.75rem;
+    background: transparent;
 }
 
 .course-editor-graphic img {
     width: 100%;
-    height: 100%;
-    object-fit: cover;
+    height: auto;
     display: block;
-}
-
-.course-editor-graphic::before {
-    content: "";
-    position: absolute;
-    inset: 1.5rem;
-    background: linear-gradient(90deg, rgba(255,255,255,0.12), transparent 35%), radial-gradient(circle at top left, rgba(229, 161, 23, 0.15), transparent 28%);
-    border-radius: 1.2rem;
-    pointer-events: none;
 }
 
 .course-info {
@@ -650,6 +665,15 @@ button, input, textarea {
     min-height: 320px;
     display: grid;
     place-content: center;
+    overflow: hidden;
+}
+
+.course-media-card img,
+.webinar-screen img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 1.75rem;
 }
 
 .code-line,
