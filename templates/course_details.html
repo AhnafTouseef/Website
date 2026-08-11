@@ -13,7 +13,7 @@
                 <span>🎥 Live + recorded</span>
             </div>
             <div class="hero-actions">
-                <a class="button button-primary" href="{{ url_for('faq') }}">Enroll — {{ active_course.price }} →</a>
+                <a class="button button-primary" href="{{ curriculum[0].Link }}">Enroll — {{ active_course.price }} →</a>
                 <a class="text-link" href="{{ url_for('webinar') }}">Try free webinar first→</a>
             </div>
         </div>
@@ -43,7 +43,7 @@
             <h2>Curriculum</h2>
         </div>
         <div class="accordion">
-            {% for item in curriculum %}
+            {% for item in curriculum[1:] %}
             <div class="accordion-item {% if loop.index == 1 %}open{% endif %}">
                 <button type="button" class="accordion-summary">{{ item.week_range }}</button>
                 <div class="accordion-panel">
@@ -81,7 +81,7 @@
                 <li>{{ feature }}</li>
                 {% endfor %}
             </ul>
-            <a class="button button-primary full-width" href="{{ url_for('faq') }}">Enroll Now →</a>
+            <a class="button button-primary full-width" href="{{ curriculum[0].Link }}">Enroll Now →</a>
             <p class="sidebar-note">Cohort starts {{ active_course.start_date }}</p>
         </div>
     </aside>

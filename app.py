@@ -80,9 +80,14 @@ def inject_random_logo():
     return {'logo': chosen}
 
 curriculum = [
-    {"week_range": "Week 1–2: Python Basics", "details": ["Variables & data types", "Control flow", "Functions", "Debugging"]},
+    {"Link": "https://forms.gle/eRr2Sk4pQzuaT9U86"},
+    {"week_range": "Week 1–2: Python Basics", 
+     "details": ["Variables & data types", "Control flow", "Functions", "Debugging"]},
+
     {"week_range": "Week 3–4: Data Structures", "details": ["Lists, dictionaries, sets", "Working with text", "Organizing code"]},
+
     {"week_range": "Week 5–6: Libraries & Practical Tools", "details": ["Pandas for data", "File handling", "Simple automation scripts"]},
+
     {"week_range": "Week 7–8: Final Project", "details": ["Build your portfolio project", "Present your solution", "Get feedback from instructors"]}
 ]
 
