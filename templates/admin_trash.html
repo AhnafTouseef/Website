@@ -1,0 +1,57 @@
+{% extends "admin_base.html" %}
+{% block title %}trash{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>trash</h1>
+    <span class="sub">{{ items|length }} deleted course(s) · stored in _trash/ next to app.py, not reachable from the website</span>
+    {% if items %}
+    <div class="right">
+        <form class="inline" method="post" action="{{ url_for('admin.trash_empty') }}" data-confirm="Permanently delete ALL {{ items|length }} item(s) in the trash? This cannot be undone.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="a-btn danger" type="submit">empty trash</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<section class="panel">
+    <header><b>_trash/</b></header>
+    {% if items %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>course</th><th>folder</th><th>deleted</th><th class="num">files</th><th class="num">size</th><th>actions</th></tr></thead>
+        <tbody>
+        {% for i in items %}
+            <tr class="row">
+                <td class="cell-title">{{ i.title }}</td>
+                <td class="dim mono-sm">{{ i.name }}</td>
+                <td class="mono-sm nowrap">{{ i.deleted|fmt_ts }} <span class="dim">({{ i.deleted|ago }})</span></td>
+                <td class="num">{{ i.files }}</td>
+                <td class="num">{{ i.size|filesize }}</td>
+                <td class="nowrap">
+                    <form class="inline" method="post" action="{{ url_for('admin.trash_restore', name=i.name) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small primary" type="submit">restore</button>
+                    </form>
+                    <form class="inline" method="post" action="{{ url_for('admin.trash_purge', name=i.name) }}" data-confirm="Permanently delete '{{ i.title }}'? This cannot be undone.">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small danger" type="submit">delete forever</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<div class="empty">trash is empty</div>{% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('submit', function (e) {
+    var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+    if (msg && !window.confirm(msg)) e.preventDefault();
+});
+</script>
+{% endblock %}

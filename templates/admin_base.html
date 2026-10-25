@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{% block title %}console{% endblock %} · belajar</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
+</head>
+<body class="admin {% block bodyclass %}{% endblock %}">
+{% block shell %}
+    <header class="a-top">
+        <a class="a-brand" href="{{ url_for('admin.dashboard') }}">belajar<span>@console</span></a>
+        <nav class="a-nav">
+            <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint == 'admin.dashboard' }}">courses</a>
+            <a href="{{ url_for('admin.course_new') }}" class="{{ 'on' if request.endpoint == 'admin.course_new' }}">+ new</a>
+            <a href="{{ url_for('admin.trash') }}" class="{{ 'on' if request.endpoint == 'admin.trash' }}">trash{% if trash_count %} <span class="badge">({{ trash_count }})</span>{% endif %}</a>
+            <a href="{{ url_for('admin.system') }}" class="{{ 'on' if request.endpoint == 'admin.system' }}">system</a>
+        </nav>
+        <span class="a-spacer"></span>
+        <span class="a-meta">
+            {% if debug %}<span class="pill-dev" title="Flask debug mode is on. Turn it off before going public.">DEBUG</span>{% endif %}
+            {% if admin_since %}<span>session since {{ admin_since }}</span>{% endif %}
+            <a href="{{ url_for('home') }}" target="_blank" rel="noopener">view site ↗</a>
+            <form method="post" action="{{ url_for('admin.logout') }}" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="a-btn small" type="submit">logout</button>
+            </form>
+        </span>
+    </header>
+
+    <div class="a-wrap">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="a-flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+{% endblock %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -29,30 +29,23 @@
     <div class="stat-card"><strong>∞</strong> Future Courses</div>
 </section> -->
 
+{% if featured_courses %}
 <section class="container featured-course">
     <div class="section-header">
-        <p class="section-label">Featured Course</p>
-        <h2>Python for Beginners: From Zero to Real Projects</h2>
+        <p class="section-label">{{ 'Featured Course' if featured_courses|length == 1 else 'Featured Courses' }}</p>
+        <h2>Learn by building real projects</h2>
         <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
     </div>
-    <div class="course-card grid-2">
-        <div class="course-image"><img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="python"></div>
-        <div class="course-details">
-            <span class="pill-tag">🟢 Now Available</span>
-            <h3>{{ active_course.title }}</h3>
-            <p>{{ active_course.subtitle }}</p>
-            <div class="course-meta">
-                <span>{{ active_course.duration }}</span>
-                <span>{{ active_course.capacity }}</span>
-                <span>{{ active_course.certificate }}</span>
-            </div>
-            <div class="course-footer">
-                <span class="course-price">{{ active_course.price }}</span>
-                <a class="button button-secondary" href="{{ url_for('course_details') }}">See Full Curriculum →</a>
-            </div>
-        </div>
+    <div class="course-grid course-grid-2">
+        {% for course in featured_courses %}
+        {% include "_course_card.html" %}
+        {% endfor %}
+    </div>
+    <div class="more-row">
+        <a class="button button-primary" href="{{ url_for('courses') }}">More Courses</a>
     </div>
 </section>
+{% endif %}
 
 <section class="container pipeline-section">
     <div class="section-header center">

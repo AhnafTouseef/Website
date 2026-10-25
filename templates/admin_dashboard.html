@@ -1,0 +1,144 @@
+{% extends "admin_base.html" %}
+{% block title %}courses{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>courses</h1>
+    <span class="sub">{{ stats.total }} folder(s) in static/course/ · read live from disk</span>
+    <div class="right">
+        <a class="a-btn primary" href="{{ url_for('admin.course_new') }}">+ new course</a>
+    </div>
+</div>
+
+<div class="tiles">
+    <div class="tile ok"><div class="k">published</div><div class="v">{{ stats.published }}</div></div>
+    <div class="tile {{ 'warn' if stats.hidden }}"><div class="k">hidden</div><div class="v">{{ stats.hidden }}</div></div>
+    <div class="tile {{ 'bad' if stats.broken else 'ok' }}"><div class="k">broken</div><div class="v">{{ stats.broken }}</div></div>
+    <div class="tile"><div class="k">weeks / topics</div><div class="v">{{ stats.weeks }} <small>/ {{ stats.topics }}</small></div></div>
+    <div class="tile"><div class="k">instructors</div><div class="v">{{ stats.instructors }}</div></div>
+    <div class="tile {{ 'warn' if stats.no_thumb }}"><div class="k">no thumbnail</div><div class="v">{{ stats.no_thumb }}</div></div>
+    <div class="tile {{ 'bad' if stats.errors else ('warn' if stats.warnings else 'ok') }}"><div class="k">errors / warnings</div><div class="v">{{ stats.errors }} <small>/ {{ stats.warnings }}</small></div></div>
+    <div class="tile"><div class="k">disk used</div><div class="v">{{ stats.bytes|filesize }}</div></div>
+</div>
+
+<section class="panel">
+    <header><b>static/course/</b><span>click “inspect” on a row to see raw files, parsed curriculum and every problem found</span></header>
+    {% if courses %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead>
+            <tr>
+                <th></th><th>course</th><th>status</th><th class="num">order</th><th>added</th><th>price</th>
+                <th class="num">wk/top</th><th>instructors</th><th>health</th><th>modified</th><th>actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for c in courses %}
+            <tr class="row">
+                <td>
+                    {% if c.thumb %}<img class="thumb" src="{{ url_for('static', filename=c.thumb) }}?v={{ c.mtime|int }}" alt="">
+                    {% else %}<div class="thumb none">no img</div>{% endif %}
+                </td>
+                <td>
+                    <div class="cell-title">{{ c.title }}</div>
+                    <div class="cell-slug">/course/{{ c.slug }}</div>
+                    <details class="dd" style="margin-top:.3rem"><summary>inspect</summary></details>
+                </td>
+                <td><span class="chip {{ c.status }}">{{ c.status }}</span></td>
+                <td class="num">{{ c.order if c.order is not none else '—' }}</td>
+                <td class="nowrap mono-sm">{{ c.added or '—' }}</td>
+                <td class="nowrap">{{ c.price or '—' }}</td>
+                <td class="num nowrap">{{ c.weeks }}/{{ c.topics }}</td>
+                <td class="mono-sm">{{ c.instructor_names|join(', ') or '—' }}</td>
+                <td class="nowrap">
+                    {% if c.n_error %}<span class="chip err">{{ c.n_error }} err</span>{% endif %}
+                    {% if c.n_warn %}<span class="chip wrn">{{ c.n_warn }} warn</span>{% endif %}
+                    {% if not c.n_error and not c.n_warn %}<span class="chip ok">ok</span>{% endif %}
+                </td>
+                <td class="dim mono-sm nowrap" title="{{ c.mtime|fmt_ts }}">{{ c.mtime|ago }}</td>
+                <td class="nowrap">
+                    <a class="a-btn small" href="{{ url_for('admin.course_edit', slug=c.slug) }}">edit</a>
+                    {% if c.status == 'published' %}<a class="a-btn small" href="{{ url_for('course_details', slug=c.slug) }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+                    {% if c.status != 'broken' %}
+                    <form class="inline" method="post" action="{{ url_for('admin.course_toggle', slug=c.slug) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small warn" type="submit">{{ 'hide' if c.status == 'published' else 'publish' }}</button>
+                    </form>
+                    {% endif %}
+                    <form class="inline" method="post" action="{{ url_for('admin.course_duplicate', slug=c.slug) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small" type="submit">dup</button>
+                    </form>
+                    <form class="inline" method="post" action="{{ url_for('admin.course_delete', slug=c.slug) }}" data-confirm="Move '{{ c.slug }}' to trash? You can restore it later.">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small danger" type="submit">delete</button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="detail" hidden>
+                <td colspan="11">
+                    <div class="dd-grid">
+                        <div>
+                            <h4>diagnostics</h4>
+                            {% if c.issues %}
+                            <ul class="issues">{% for i in c.issues %}<li class="{{ i.level }}">{{ i.text }}</li>{% endfor %}</ul>
+                            {% else %}<div class="dim">no problems found</div>{% endif %}
+                            <h4 style="margin-top:.8rem">files · {{ c.files|length }} · {{ c.size|filesize }}</h4>
+                            <div class="tree">
+                                {% for f in c.files %}<div><span class="n">{{ f.name }}</span><span class="s">{{ f.size|filesize }}</span></div>{% endfor %}
+                                {% if not c.files %}<div class="dim">empty folder</div>{% endif %}
+                            </div>
+                        </div>
+                        <div><h4>meta.json (raw)</h4><pre class="code">{{ c.meta_text|json_hl if c.meta_text else '(missing)' }}</pre></div>
+                        <div><h4>curriculum.csv (raw)</h4><pre class="code">{{ c.csv_text if c.csv_text else '(missing)' }}</pre></div>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty">static/course/ has no course folders yet. <a href="{{ url_for('admin.course_new') }}">Create the first one →</a></div>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <header><b>static/instructors/</b><span>read-only here; edit profile.json and photo files in the folder</span></header>
+    {% if instructors %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th></th><th>name</th><th>role</th><th>folder</th><th class="num">order</th><th class="num">used in</th></tr></thead>
+        <tbody>
+        {% for p in instructors %}
+            <tr class="row">
+                <td>{% if p.photo %}<img class="thumb" style="width:46px" src="{{ url_for('static', filename=p.photo) }}" alt="">{% else %}<div class="thumb none" style="width:46px">—</div>{% endif %}</td>
+                <td class="cell-title">{{ p.name }}</td>
+                <td>{{ p.role or '—' }}</td>
+                <td class="dim mono-sm">instructors/{{ p.slug }}/</td>
+                <td class="num">{{ p.order }}</td>
+                <td class="num">{{ p.used_in }} course(s)</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<div class="empty">no instructor folders found</div>{% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    // "inspect" toggles the detail row below it
+    document.querySelectorAll('details.dd').forEach(function (d) {
+        var detailRow = d.closest('tr').nextElementSibling;
+        d.addEventListener('toggle', function () { detailRow.hidden = !d.open; });
+    });
+    // confirm dialogs for forms that carry data-confirm
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+})();
+</script>
+{% endblock %}

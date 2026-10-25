@@ -1,0 +1,27 @@
+{% extends "admin_base.html" %}
+{% block title %}login{% endblock %}
+{% block bodyclass %}login{% endblock %}
+{% block shell %}
+<div class="login-box">
+    <div class="term">
+        <header>
+            <span class="dot" style="background:#ff5c6c"></span><span class="dot" style="background:#f5b53d"></span><span class="dot" style="background:#3ddc84"></span>
+            <span style="margin-left:.5rem">restricted — authorised access only</span>
+        </header>
+        <div class="body">
+            <div class="prompt">belajar@console:~$ sudo login<span class="cursor"></span></div>
+            <form method="post" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
+                <div class="field">
+                    <label class="l" for="pw">password</label>
+                    <input id="pw" type="password" name="password" autofocus required>
+                </div>
+                {% if error %}<p class="err">✗ {{ error }}</p>{% endif %}
+                <p style="margin:.9rem 0 0"><button class="a-btn primary" type="submit">authenticate →</button></p>
+            </form>
+        </div>
+    </div>
+    <p class="foot">5 wrong attempts lock this page for 5 minutes. Attempts are logged.</p>
+</div>
+{% endblock %}

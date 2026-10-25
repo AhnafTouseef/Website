@@ -1,0 +1,329 @@
+{% extends "admin_base.html" %}
+{% block title %}{{ 'new course' if creating else slug }}{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>{% if creating %}new course{% else %}edit {{ slug }}{% endif %}</h1>
+    <span class="sub">{% if creating %}creates static/course/&lt;folder&gt;/ with meta.json + curriculum.csv{% else %}static/course/{{ slug }}/{% endif %}</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('admin.dashboard') }}">← back</a>
+        {% if public_visible %}<a class="a-btn" href="{{ url_for('course_details', slug=slug) }}" target="_blank" rel="noopener">view public page ↗</a>{% endif %}
+    </div>
+</div>
+
+{% if load_error %}
+<div class="errors">meta.json could not be read ({{ load_error }}). The form below starts from empty values; saving will overwrite the broken file with a clean one. Hand-added keys in the old file cannot be kept.</div>
+{% endif %}
+{% if errors %}
+<div class="errors"><b>Not saved. Fix these first:</b><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" id="editor" autocomplete="off">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="split">
+    <div>
+        <section class="panel">
+            <header><b>identity</b></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-slug">folder name <code>(URL slug)</code></label>
+                    {% if creating %}
+                    <input id="f-slug" type="text" name="slug" value="{{ form.slug }}" placeholder="web-dev-basics" maxlength="60" required>
+                    <div class="help">lowercase letters, digits, single hyphens. Becomes /course/&lt;this&gt; and cannot be changed later.</div>
+                    {% else %}
+                    <input id="f-slug" type="text" value="{{ slug }}" readonly>
+                    <div class="help">fixed after creation (changing it would break existing links). Duplicate the course if you need another name.</div>
+                    {% endif %}
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-title">title <code>title</code></label>
+                    <input id="f-title" type="text" name="title" value="{{ form.title }}" required>
+                </div>
+                <div class="field">
+                    <label class="l" for="f-tagline">tagline <code>tagline</code></label>
+                    <input id="f-tagline" type="text" name="tagline" value="{{ form.tagline }}" placeholder="Enrolling Now · Cohort 1">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-subtitle">subtitle <code>subtitle</code></label>
+                    <input id="f-subtitle" type="text" name="subtitle" value="{{ form.subtitle }}" placeholder="one line shown on course cards">
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-description">description <code>description</code></label>
+                    <textarea id="f-description" name="description" rows="3">{{ form.description }}</textarea>
+                    <div class="help">shown at the top of the course page. Empty = the subtitle is used.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>commerce</b></header>
+            <div class="body f-grid">
+                <div class="field">
+                    <label class="l" for="f-price">price <code>price</code></label>
+                    <input id="f-price" type="text" name="price" value="{{ form.price }}" placeholder="Tk 500.00">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-start">start date <code>start_date</code></label>
+                    <input id="f-start" type="text" name="start_date" value="{{ form.start_date }}" placeholder="January 10, 2027">
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-enroll">enroll link <code>enroll_link</code></label>
+                    <input id="f-enroll" type="text" name="enroll_link" value="{{ form.enroll_link }}" placeholder="https://forms.gle/...">
+                    <div class="help">empty = the Enroll buttons are hidden.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-webinar">complimentary webinar link <code>webinar_link</code></label>
+                    <input id="f-webinar" type="text" name="webinar_link" value="{{ form.webinar_link }}" placeholder="https://...">
+                    <div class="help">empty = “Try free webinar first” opens the site’s own /webinar page.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>course facts</b></header>
+            <div class="body f-grid">
+                <div class="field">
+                    <label class="l" for="f-duration">duration <code>duration</code></label>
+                    <input id="f-duration" type="text" name="duration" value="{{ form.duration }}" placeholder="8 Weeks">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-capacity">capacity <code>capacity</code></label>
+                    <input id="f-capacity" type="text" name="capacity" value="{{ form.capacity }}" placeholder="Max 30 Students">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-cert">certificate <code>certificate</code></label>
+                    <input id="f-cert" type="text" name="certificate" value="{{ form.certificate }}" placeholder="Certificate">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-order">sort order <code>order</code></label>
+                    <input id="f-order" type="number" name="order" value="{{ form.order }}" step="1">
+                    <div class="help">lower = earlier. The first published course is what the header “Enroll Now” opens.</div>
+                </div>
+                <div class="field">
+                    <label class="l" for="f-added">date added <code>added</code></label>
+                    <input id="f-added" type="text" name="added" value="{{ form.added }}" placeholder="2026-10-26" maxlength="10">
+                    <div class="help">YYYY-MM-DD. The home page shows the 2 newest courses by this date.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-features">price-box features <code>features</code> — one per line</label>
+                    <textarea id="f-features" name="features" rows="5">{{ form.features }}</textarea>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-learn">what you will learn <code>what_you_will_learn</code> — one per line</label>
+                    <textarea id="f-learn" name="what_you_will_learn" rows="7">{{ form.what_you_will_learn }}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>instructors</b><span>pick from static/instructors/ · saved by name in <code>instructors</code></span></header>
+            <div class="body">
+                {% if instructors or extra_instructors %}
+                <div class="people">
+                    {% for p in instructors %}
+                    <label class="chk"><input type="checkbox" name="instructors" value="{{ p.name }}" {% if p.name in form.instructors %}checked{% endif %}> {{ p.name }} <span class="sub">{{ p.role }}</span></label>
+                    {% endfor %}
+                    {% for name in extra_instructors %}
+                    <label class="chk"><input type="checkbox" name="instructors" value="{{ name }}" checked> {{ name }} <span class="sub" style="color:var(--a-amber)">no matching profile folder (shown by name only)</span></label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="dim">no instructor folders yet. Add static/instructors/&lt;name&gt;/profile.json + photo.jpg.</div>
+                {% endif %}
+                <div class="help" style="margin-top:.4rem">Order on the course page follows each instructor’s own <code>order</code> value.</div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>curriculum</b><span>curriculum.csv · columns <code>week,topic</code> · blank week cell = same week as the row above</span></header>
+            <div class="body">
+                <textarea id="f-csv" name="curriculum_csv" rows="14" spellcheck="false" style="white-space:pre; overflow:auto">{{ form.csv }}</textarea>
+                <div class="csv-preview" id="csv-preview"></div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>thumbnail</b><span>thumbnail.jpg / .png / .webp / .gif · max 5 MB · checked by content, not by file name</span></header>
+            <div class="body">
+                {% if thumb %}
+                <img class="thumb-big" id="thumb-current" src="{{ url_for('static', filename=thumb) }}?t={{ range(1, 10**9)|random }}" alt="current thumbnail">
+                <div class="dim mono-sm" style="margin-bottom:.5rem">current: {{ thumb }}</div>
+                {% else %}
+                <div class="dim" style="margin-bottom:.5rem">no thumbnail yet</div>
+                {% endif %}
+                <img class="thumb-big" id="thumb-new" alt="new thumbnail preview" hidden>
+                <input type="file" name="thumbnail" id="f-thumb" accept="image/png,image/jpeg,image/webp,image/gif">
+                <div class="help">choosing a file replaces the current one when you save.</div>
+                {% if thumb %}<label class="chk" style="margin-top:.4rem"><input type="checkbox" name="remove_thumbnail"> remove the current thumbnail</label>{% endif %}
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>visibility</b></header>
+            <div class="body">
+                <label class="chk"><input type="checkbox" name="published" {% if form.published %}checked{% endif %}> <b>published</b> <span class="sub">— unticked = hidden from the public site (saved as a draft)</span></label>
+            </div>
+        </section>
+
+        <div class="savebar" id="savebar">
+            <button class="a-btn primary" type="submit">{{ 'create course' if creating else 'save changes' }}</button>
+            <a class="a-btn" href="{{ url_for('admin.dashboard') }}">cancel</a>
+            <span class="dirty">● unsaved changes</span>
+        </div>
+    </div>
+
+    <aside class="sticky">
+        <section class="panel">
+            <header><b>meta.json</b><span>live preview of what will be written</span></header>
+            <div class="body"><pre class="code wrap" id="json-preview"></pre></div>
+        </section>
+        {% if not creating %}
+        <section class="panel danger">
+            <header><b>danger zone</b></header>
+            <div class="body">
+                <p class="dim" style="margin-top:0">Delete moves the whole folder (including the thumbnail) to _trash/. It disappears from the public site immediately and can be restored from the Trash page.</p>
+                <button class="a-btn danger" type="submit" form="delete-form">move to trash</button>
+            </div>
+        </section>
+        {% endif %}
+    </aside>
+</div>
+</form>
+
+{% if not creating %}
+<form id="delete-form" method="post" action="{{ url_for('admin.course_delete', slug=slug) }}" data-confirm="Move '{{ slug }}' to trash? You can restore it later.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var form = document.getElementById('editor');
+    var jsonBox = document.getElementById('json-preview');
+    var csvBox = document.getElementById('csv-preview');
+    var csvArea = document.getElementById('f-csv');
+    var savebar = document.getElementById('savebar');
+    var dirty = false;
+
+    function val(name) {
+        var el = form.elements[name];
+        return el ? el.value.trim() : '';
+    }
+    function lines(name) {
+        return val(name) === '' ? [] : form.elements[name].value.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function highlight(text) {
+        return esc(text).replace(/("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?/g, function (m, str, colon, lit) {
+            if (str) return '<span class="' + (colon ? 'j-key' : 'j-str') + '">' + str + '</span>' + (colon || '');
+            if (lit) return '<span class="j-lit">' + m + '</span>';
+            return '<span class="j-num">' + m + '</span>';
+        });
+    }
+
+    function renderJson() {
+        var order = parseInt(val('order'), 10);
+        var meta = {
+            title: val('title'), tagline: val('tagline'), subtitle: val('subtitle'), description: val('description'),
+            duration: val('duration'), capacity: val('capacity'), certificate: val('certificate'),
+            price: val('price'), start_date: val('start_date'),
+            enroll_link: val('enroll_link'), webinar_link: val('webinar_link'),
+            features: lines('features'), what_you_will_learn: lines('what_you_will_learn'),
+            instructors: Array.prototype.slice.call(form.querySelectorAll('input[name=instructors]:checked')).map(function (c) { return c.value; }),
+            order: isNaN(order) ? 100 : order,
+            added: val('added'),
+            published: !!form.elements['published'].checked
+        };
+        jsonBox.innerHTML = highlight(JSON.stringify(meta, null, 4));
+    }
+
+    // minimal CSV parser (quotes, commas, CRLF) for the preview only; the server is the source of truth
+    function parseCsv(text) {
+        var rows = [], row = [], cell = '', q = false;
+        for (var i = 0; i < text.length; i++) {
+            var ch = text[i];
+            if (q) {
+                if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+                else cell += ch;
+            } else if (ch === '"') q = true;
+            else if (ch === ',') { row.push(cell); cell = ''; }
+            else if (ch === '\n' || ch === '\r') {
+                if (ch === '\r' && text[i + 1] === '\n') i++;
+                row.push(cell); rows.push(row); row = []; cell = '';
+            } else cell += ch;
+        }
+        if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+        return rows;
+    }
+
+    function renderCsv() {
+        var rows = parseCsv(csvArea.value);
+        var heads = ['week', 'week_range', 'weeks', 'title'];
+        if (rows.length && heads.indexOf((rows[0][0] || '').trim().toLowerCase()) !== -1) rows.shift();
+        var groups = [], map = {}, current = null, problem = '';
+        rows.forEach(function (r) {
+            if (!r.some(function (c) { return c.trim(); })) return;
+            var wk = (r[0] || '').trim(), tp = (r[1] || '').trim();
+            if (wk) current = wk;
+            if (current === null) { problem = 'Rows before the first week label are ignored.'; return; }
+            if (!(current in map)) { map[current] = []; groups.push(current); }
+            if (tp) map[current].push(tp);
+        });
+        var topics = groups.reduce(function (n, g) { return n + map[g].length; }, 0);
+        var html = '<div class="dim" style="margin-bottom:.3rem">parsed: ' + groups.length + ' week(s), ' + topics + ' topic(s)</div>';
+        if (problem) html += '<div style="color:var(--a-amber)">' + problem + '</div>';
+        groups.forEach(function (g) {
+            html += '<div class="wk">' + esc(g) + '</div><ul>' + map[g].map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+        });
+        csvBox.innerHTML = html;
+    }
+
+    function markDirty() {
+        dirty = true;
+        savebar.classList.add('is-dirty');
+    }
+    function refresh() { renderJson(); renderCsv(); }
+
+    form.addEventListener('input', function () { refresh(); markDirty(); });
+    form.addEventListener('change', function () { refresh(); markDirty(); });
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) {
+        if (dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // thumbnail preview
+    var thumbInput = document.getElementById('f-thumb');
+    var thumbNew = document.getElementById('thumb-new');
+    thumbInput.addEventListener('change', function () {
+        var file = thumbInput.files && thumbInput.files[0];
+        if (!file) { thumbNew.hidden = true; return; }
+        if (file.size > 5 * 1024 * 1024) { alert('That image is larger than 5 MB; the server will reject it.'); }
+        thumbNew.src = URL.createObjectURL(file);
+        thumbNew.hidden = false;
+    });
+
+    // Ctrl+S / Cmd+S saves
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            if (form.reportValidity()) { dirty = false; form.submit(); }
+        }
+    });
+
+    // delete form confirm
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg) {
+            if (!window.confirm(msg)) e.preventDefault();
+            else dirty = false;
+        }
+    });
+
+    refresh();
+})();
+</script>
+{% endblock %}

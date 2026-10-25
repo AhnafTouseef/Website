@@ -158,3 +158,14 @@
         font-size: 2rem;
     }
 }
+
+/* Course cards on phones: one per row */
+@media (max-width: 640px) {
+    .course-grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+    .tile-foot .button {
+        width: auto;
+    }
+}

@@ -1,3 +1,16 @@
+# generated on first run; never commit
+admin_password.txt
+secret_key.txt
+
+# deleted courses (admin trash)
+_trash/
+__pycache__/
+venv/
+
+
 static/course/
 static/images/
 static/logo/
+static/instructors/
+static/webinar.jpg
+Archive.zip

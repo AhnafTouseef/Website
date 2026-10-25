@@ -13,21 +13,15 @@
         <span class="status-dot"></span>
         <span class="status-text">Available Now</span>
     </div>
-    <div class="pipeline-card active-course-card">
-        <div class="course-editor-graphic">
-            <img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="Python for Beginners" />
-        </div>
-        <div class="course-info">
-            <span class="pill-tag">{{ active_course.tagline }}</span>
-            <h2>{{ active_course.title }}</h2>
-            <p>{{ active_course.subtitle }}</p>
-            <div class="course-meta">{{ active_course.duration }} | {{ active_course.capacity }} | {{ active_course.certificate }}</div>
-            <div class="course-footer">
-                <span class="course-price">{{ active_course.price }}</span>
-                <a class="button button-primary" href="{{ url_for('course_details') }}">View Curriculum →</a>
-            </div>
-        </div>
+    {% if courses %}
+    <div class="course-grid">
+        {% for course in courses %}
+        {% include "_course_card.html" %}
+        {% endfor %}
     </div>
+    {% else %}
+    <p class="subtle">No courses are open for enrollment right now. Have a look at what's coming below.</p>
+    {% endif %}
 </section>
 
 <section class="container pipeline-section">
@@ -36,11 +30,11 @@
         <p>Upcoming learning tracks with release windows so you can plan your next step.</p>
     </div>
     <div class="pipeline-grid pipeline-grid-3">
-        {% for course in pipeline_courses %}
+        {% for item in pipeline_courses %}
         <div class="pipeline-card pipeline-small">
-            <div class="pipeline-icon">{{ course.icon }}</div>
-            <h4>{{ course.title }}</h4>
-            <p>{{ course.estimate }}</p>
+            <div class="pipeline-icon">{{ item.icon }}</div>
+            <h4>{{ item.title }}</h4>
+            <p>{{ item.estimate }}</p>
         </div>
         {% endfor %}
     </div>

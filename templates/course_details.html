@@ -3,23 +3,33 @@
 <section class="hero hero-dark course-hero">
     <div class="container hero-grid">
         <div class="hero-copy">
-            <span class="pill-tag">Enrolling Now · Cohort 1 · Starts {{ active_course.start_date }}</span>
-            <h1>{{ active_course.title }}</h1>
-            <p>Join a structured, mentor-led 8-week Python course built for students who want to ship real projects and land practical skills quickly.</p>
+            {% if course.tagline or course.start_date %}
+            <span class="pill-tag">{{ course.tagline }}{% if course.tagline and course.start_date %} · {% endif %}{% if course.start_date %}Starts {{ course.start_date }}{% endif %}</span>
+            {% endif %}
+            <h1>{{ course.title }}</h1>
+            <p>{{ course.description }}</p>
             <div class="course-meta-list">
-                <span>⏱️ {{ active_course.duration }}</span>
-                <span>👥 {{ active_course.capacity }}</span>
-                <span>🏅 {{ active_course.certificate }}</span>
+                {% if course.duration %}<span>⏱️ {{ course.duration }}</span>{% endif %}
+                {% if course.capacity %}<span>👥 {{ course.capacity }}</span>{% endif %}
+                {% if course.certificate %}<span>🏅 {{ course.certificate }}</span>{% endif %}
                 <span>🎥 Live + recorded</span>
             </div>
             <div class="hero-actions">
-                <a class="button button-primary" href="{{ curriculum[0].Link }}">Enroll — {{ active_course.price }} →</a>
+                {% if course.enroll_link %}
+                <a class="button button-primary" href="{{ course.enroll_link }}">Enroll{% if course.price %} — {{ course.price }}{% endif %} →</a>
+                {% endif %}
+                {% if course.webinar_link %}
+                <a class="text-link" href="{{ course.webinar_link }}" target="_blank" rel="noopener">Try free webinar first→</a>
+                {% else %}
                 <a class="text-link" href="{{ url_for('webinar') }}">Try free webinar first→</a>
+                {% endif %}
             </div>
         </div>
         <div class="hero-visual course-hero-media">
-            <div class="course-media-card">
-                <img src="{{ url_for('static', filename='course/python_beginer.jpg') }}" alt="Python for Beginners">
+            <div class="course-media-card thumb-frame">
+                {% if course.thumbnail %}
+                <img src="{{ url_for('static', filename=course.thumbnail) }}" alt="{{ course.title }}">
+                {% endif %}
             </div>
         </div>
     </div>
@@ -27,24 +37,24 @@
 
 <section class="container grid-2 course-main">
     <div>
+        {% if course.learn %}
         <div class="section-header">
             <h2>What You'll Learn</h2>
         </div>
         <div class="learn-grid">
-            <div class="learn-item">✔️ Write Python code from scratch</div>
-            <div class="learn-item">✔️ Build automation scripts</div>
-            <div class="learn-item">✔️ Work with real-world data using pandas</div>
-            <div class="learn-item">✔️ Finish with a complete portfolio project</div>
-            <div class="learn-item">✔️ Understand control flow and functions</div>
-            <div class="learn-item">✔️ Gain confidence in debugging</div>
+            {% for item in course.learn %}
+            <div class="learn-item">✔️ {{ item }}</div>
+            {% endfor %}
         </div>
+        {% endif %}
 
+        {% if course.curriculum %}
         <div class="section-header">
             <h2>Curriculum</h2>
         </div>
         <div class="accordion">
-            {% for item in curriculum[1:] %}
-            <div class="accordion-item {% if loop.index == 1 %}open{% endif %}">
+            {% for item in course.curriculum %}
+            <div class="accordion-item {% if loop.first %}open{% endif %}">
                 <button type="button" class="accordion-summary">{{ item.week_range }}</button>
                 <div class="accordion-panel">
                     <ul>
@@ -56,33 +66,42 @@
             </div>
             {% endfor %}
         </div>
+        {% endif %}
 
+        {% if course.instructors %}
         <div class="section-header">
             <h2>Your Instructors</h2>
         </div>
         <div class="team-grid">
-            {% for member in team_members %}
+            {% for member in course.instructors %}
             <div class="team-card">
-                <!-- <div class="avatar">{{ member.avatar }}</div> -->
+                {% if member.photo %}
+                <img class="instructor-photo" src="{{ url_for('static', filename=member.photo) }}" alt="{{ member.name }}">
+                {% endif %}
                 <h3>{{ member.name }}</h3>
-                <p class="team-role">{{ member.role }}</p>
-                <p>{{ member.bio }}</p>
+                {% if member.role %}<p class="team-role">{{ member.role }}</p>{% endif %}
+                {% if member.bio %}<p>{{ member.bio }}</p>{% endif %}
             </div>
             {% endfor %}
         </div>
+        {% endif %}
     </div>
     <aside class="pricing-sidebar">
         <div class="pricing-card">
             <span class="section-label">Course Price</span>
-            <h2>{{ active_course.price }}</h2>
+            <h2>{{ course.price }}</h2>
             <p class="subtle">One-time payment · Full access</p>
+            {% if course.features %}
             <ul class="feature-list">
-                {% for feature in active_course.features %}
+                {% for feature in course.features %}
                 <li>{{ feature }}</li>
                 {% endfor %}
             </ul>
-            <a class="button button-primary full-width" href="{{ curriculum[0].Link }}">Enroll Now →</a>
-            <p class="sidebar-note">Cohort starts {{ active_course.start_date }}</p>
+            {% endif %}
+            {% if course.enroll_link %}
+            <a class="button button-primary full-width" href="{{ course.enroll_link }}">Enroll Now →</a>
+            {% endif %}
+            {% if course.start_date %}<p class="sidebar-note">Cohort starts {{ course.start_date }}</p>{% endif %}
         </div>
     </aside>
 </section>

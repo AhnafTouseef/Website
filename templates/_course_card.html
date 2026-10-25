@@ -1,0 +1,19 @@
+{# One course card. Include inside a loop that sets `course`: {% include "_course_card.html" %} #}
+<article class="course-tile">
+    <a class="tile-thumb{% if not course.thumbnail %} empty{% endif %}" href="{{ url_for('course_details', slug=course.slug) }}" aria-label="{{ course.title }}" tabindex="-1">
+        {% if course.thumbnail %}
+        <img src="{{ url_for('static', filename=course.thumbnail) }}" alt="{{ course.title }}" loading="lazy">
+        {% endif %}
+        <span class="tile-badge">{{ course.tagline or 'Now Available' }}</span>
+    </a>
+    <div class="tile-body">
+        <h3 class="tile-title"><a href="{{ url_for('course_details', slug=course.slug) }}">{{ course.title }}</a></h3>
+        {% if course.subtitle %}<p class="tile-sub">{{ course.subtitle }}</p>{% endif %}
+        {% set facts = [course.duration, course.capacity, course.certificate] | select | list %}
+        {% if facts %}<div class="tile-meta">{{ facts | join(' · ') }}</div>{% endif %}
+        <div class="tile-foot">
+            <span class="course-price">{{ course.price }}</span>
+            <a class="button button-secondary" href="{{ url_for('course_details', slug=course.slug) }}">View Course →</a>
+        </div>
+    </div>
+</article>

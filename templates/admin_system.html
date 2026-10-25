@@ -1,0 +1,60 @@
+{% extends "admin_base.html" %}
+{% block title %}system{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>system</h1>
+    <span class="sub">runtime, routes, content sources and recent log</span>
+</div>
+
+<div class="split">
+    <div>
+        <section class="panel">
+            <header><b>environment</b></header>
+            <div class="body">
+                <dl class="kv">
+                    {% for k, v in info.items() %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
+                </dl>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>routes</b><span>{{ routes|length }} registered</span></header>
+            <div class="scroll-x">
+            <table class="t">
+                <thead><tr><th>rule</th><th>methods</th><th>endpoint</th></tr></thead>
+                <tbody>
+                {% for r in routes %}
+                    <tr class="row"><td>{{ r.rule }}</td><td class="dim">{{ r.methods }}</td><td class="dim">{{ r.endpoint }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </section>
+    </div>
+
+    <div>
+        <section class="panel">
+            <header><b>content sources</b></header>
+            <div class="body">
+                <dl class="kv">
+                    <dt>Courses</dt><dd>static/course/&lt;folder&gt;/ (meta.json, curriculum.csv, thumbnail.*)</dd>
+                    <dt>Instructors</dt><dd>{{ instructors|length }} in static/instructors/&lt;folder&gt;/ (profile.json, photo.*)</dd>
+                    <dt>Logos</dt><dd>{{ logos|length }} in static/logo/ (one is picked at random per page view){% if logos %}<br><span class="dim">{{ logos|join(', ') }}</span>{% endif %}</dd>
+                    <dt>Pipeline cards</dt><dd>{{ pipeline_count }} — in app.py (<span class="dim">pipeline_courses</span>)</dd>
+                    <dt>FAQ entries</dt><dd>{{ faq_count }} — in app.py (<span class="dim">faq_questions</span>)</dd>
+                </dl>
+                <p class="dim mono-sm" style="margin:.8rem 0 0">Pipeline cards and FAQ are still edited in app.py; only courses are managed from this console.</p>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>recent log</b><span>this server process only · repeated lines are merged</span></header>
+            <div class="body">
+                {% for l in logs %}
+                <div class="log-line"><span class="lv {{ l.level }}">{{ l.level }}</span><span class="ms">{{ l.msg }}</span><span class="ct">{{ l.last|ago }}{% if l.count > 1 %} ×{{ l.count }}{% endif %}</span></div>
+                {% else %}<div class="dim">nothing logged yet</div>{% endfor %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
