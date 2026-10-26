@@ -36,7 +36,8 @@
         <h2>Learn by building real projects</h2>
         <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
     </div>
-    <div class="course-grid course-grid-2">
+    {# 1 course = one wide card using the whole section; 2 courses = two compact cards side by side #}
+    <div class="course-grid wide {{ 'course-grid-1' if featured_courses|length == 1 else 'course-grid-2' }}">
         {% for course in featured_courses %}
         {% include "_course_card.html" %}
         {% endfor %}

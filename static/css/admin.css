@@ -226,3 +226,101 @@ body.admin.login { display: grid; place-items: center; min-height: 100vh; paddin
 .log-line .ct { color: var(--a-dim); flex: none; min-width: 3.5rem; text-align: right; }
 .log-line .ms { flex: 1; word-break: break-word; }
 .empty { color: var(--a-dim); padding: 1.2rem; text-align: center; }
+
+/* ---------- discount field + live price preview ---------- */
+.opt { color: var(--a-dim); font-size: 0.72rem; text-transform: none; letter-spacing: 0; border: 1px solid var(--a-line); padding: 0 0.3rem; margin-left: 0.3rem; }
+.suffixed { display: flex; align-items: stretch; }
+.suffixed input { flex: 1; min-width: 0; }
+.suffixed span { display: grid; place-items: center; padding: 0 0.7rem; background: var(--a-panel-2); border: 1px solid var(--a-line); border-left: 0; color: var(--a-dim); }
+.pv { padding: 0.45rem 0.7rem; border: 1px dashed var(--a-line); background: var(--a-panel-2); min-height: 2.2rem; }
+.pv.ok { border-style: solid; border-color: #1e6b45; }
+.pv.bad { border-style: solid; border-color: #7a2a33; color: var(--a-red); }
+.pv-old { color: var(--a-dim); }
+.pv-new { color: #ff4d6d; font-size: 1.05rem; }
+.pv-off { color: #fff; background: #e11d48; padding: 0 0.4rem; font-size: 0.78rem; font-weight: 700; }
+
+/* ---------- curriculum import drop-zone ---------- */
+.dropzone { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.9rem; align-items: center; padding: 0.9rem 1rem; border: 2px dashed var(--a-line); background: var(--a-panel-2); transition: border-color .15s, background .15s; }
+.dropzone.drag { border-color: var(--a-green); background: #10241a; }
+.dz-icon { font-size: 1.8rem; color: var(--a-green); grid-row: span 2; line-height: 1; }
+.dz-text { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.dz-hint { font-size: 0.78rem; }
+.dz-status { grid-column: 1 / -1; font-size: 0.82rem; }
+.dz-status:empty { display: none; }
+.dz-status.ok { color: var(--a-green); }
+.dz-status.bad { color: var(--a-red); }
+.dz-status.busy { color: var(--a-amber); }
+
+/* ---------- thumbnail uploader ---------- */
+.uploader { max-width: 420px; }
+.up-frame { position: relative; aspect-ratio: 16 / 9; border: 2px dashed var(--a-line); background: var(--a-panel-2); display: grid; place-items: center; overflow: hidden; outline: none; transition: border-color .15s, background .15s; }
+.up-frame:focus-visible { border-color: var(--a-blue); }
+.uploader[data-state="empty"] .up-frame { cursor: pointer; }
+.uploader[data-state="empty"] .up-frame:hover, .up-frame.drag { border-color: var(--a-green); background: #10241a; }
+.uploader:not([data-state="empty"]) .up-frame { border-style: solid; }
+.up-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; max-width: none; }
+.up-empty { text-align: center; padding: 0.5rem; }
+.up-icon { font-size: 1.9rem; line-height: 1.2; }
+.uploader:not([data-state="empty"]) .up-empty { display: none; }
+.up-actions { position: absolute; top: 0.4rem; right: 0.4rem; display: none; gap: 0.35rem; }
+.uploader:not([data-state="empty"]) .up-actions { display: flex; }
+.up-actions .a-btn { background: rgba(11, 15, 20, 0.88); }
+.up-status { margin-top: 0.45rem; font-size: 0.8rem; min-height: 1.2em; }
+.up-status.ok { color: var(--a-green); }
+.up-status.bad { color: var(--a-red); }
+.up-status.warn { color: var(--a-amber); }
+.linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--a-blue); text-decoration: underline; cursor: pointer; }
+
+/* ---------- dashboard sale price ---------- */
+.sale-old { color: var(--a-dim); text-decoration: line-through; display: block; font-size: 0.8rem; }
+.sale-new { color: #ff4d6d; font-weight: 700; }
+.sale-tag { color: #fff; background: #e11d48; padding: 0 0.3rem; font-size: 0.72rem; margin-left: 0.3rem; }
+
+/* ---------- curriculum preview table (same idea as the public page) ---------- */
+.sheet-prev { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; }
+.sheet-prev th, .sheet-prev td { border: 1px solid var(--a-line); padding: 0.3rem 0.6rem; text-align: left; vertical-align: top; }
+.sheet-prev th { background: var(--a-panel-2); color: var(--a-amber); white-space: nowrap; }
+.sheet-prev td.cont { border-top-style: hidden; }
+.sheet-prev tr.gap td { height: 0.6rem; padding: 0; background: var(--a-panel-2); }
+
+/* ---------- instructors section ---------- */
+.a-note { border: 1px solid var(--a-line); border-left: 3px solid var(--a-blue); background: var(--a-panel); color: var(--a-dim); padding: 0.55rem 0.9rem; margin-bottom: 1rem; font-size: 0.85rem; }
+.a-note b { color: var(--a-text); }
+.req { color: var(--a-red); }
+.warn-text { color: var(--a-amber); }
+.plainlist { margin: 0; padding-left: 1.1rem; color: var(--a-text); }
+a.tile.link { display: block; text-decoration: none; }
+a.tile.link:hover { border-color: var(--a-dim); }
+.thumb.square { width: 46px; height: 46px; }
+.mini-meter { display: inline-block; width: 64px; height: 6px; background: var(--a-panel-2); border: 1px solid var(--a-line); vertical-align: middle; }
+.mini-meter i { display: block; height: 100%; background: var(--a-green); }
+.meter { height: 8px; background: var(--a-panel-2); border: 1px solid var(--a-line); margin-bottom: 0.7rem; }
+.meter i { display: block; height: 100%; width: 0; background: var(--a-green); transition: width .2s; }
+.checks { list-style: none; margin: 0 0 0.6rem; padding: 0; display: grid; gap: 0.2rem; }
+.checks li { color: var(--a-dim); display: flex; gap: 0.5rem; align-items: center; }
+.checks .mark { width: 0.9rem; height: 0.9rem; border: 1px solid var(--a-line); display: inline-grid; place-items: center; font-size: 0.7rem; line-height: 1; }
+.checks li.on { color: var(--a-text); }
+.checks li.on .mark { background: #123524; border-color: #1e6b45; color: var(--a-green); }
+.checks li.on .mark::after { content: "✓"; }
+
+/* repeatable rows */
+.rep-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.6rem; padding: 0.7rem; margin-bottom: 0.6rem; border: 1px solid var(--a-line); background: var(--a-panel-2); }
+.rep-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 0.8rem; }
+.rep-fields .span2 { grid-column: 1 / -1; }
+.rep-fields textarea { min-height: 2.6rem; resize: vertical; }
+.rep-ctl { display: flex; flex-direction: column; gap: 0.3rem; }
+.rep-empty { padding: 0.3rem 0 0.6rem; }
+@media (max-width: 640px) { .rep-fields { grid-template-columns: 1fr; } .rep-row { grid-template-columns: 1fr; } .rep-ctl { flex-direction: row; } }
+
+/* square photo uploader */
+.uploader.square { max-width: 240px; }
+.uploader.square .up-frame { aspect-ratio: 1 / 1; }
+
+/* CV box */
+.cvbox .cv-line { display: none; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.55rem 0.8rem; border: 1px dashed var(--a-line); background: var(--a-panel-2); }
+.cvbox[data-state="empty"] .cv-empty,
+.cvbox[data-state="current"] .cv-current,
+.cvbox[data-state="new"] .cv-new,
+.cvbox[data-state="removed"] .cv-removed { display: flex; }
+.cvbox[data-state="current"] .cv-current, .cvbox[data-state="new"] .cv-new { border-style: solid; }
+.cv-ico { font-size: 1.3rem; }

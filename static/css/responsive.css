@@ -159,13 +159,35 @@
     }
 }
 
-/* Course cards on phones: one per row */
-@media (max-width: 640px) {
+/* Course cards: on tablets the two home cards stack (each still wide and compact) */
+@media (max-width: 980px) {
     .course-grid-2 {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ...and on phones every card becomes vertical: thumbnail on top */
+@media (max-width: 640px) {
+    .course-grid.wide .course-tile {
+        display: flex;
+    }
+
+    .course-grid.wide .tile-media {
+        display: block;
+    }
+
+    .course-grid.wide .tile-body,
+    .course-grid-1.wide .tile-body {
+        padding: 1rem 1.1rem 1.15rem;
     }
 
     .tile-foot .button {
         width: auto;
     }
+}
+
+@media (max-width: 860px) {
+    .profile-hero-grid { grid-template-columns: 1fr; text-align: left; gap: 1.5rem; }
+    .profile-photo img, .profile-initials { width: 150px; }
+    .profile-body { grid-template-columns: 1fr; }
 }

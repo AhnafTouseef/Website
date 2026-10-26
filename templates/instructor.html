@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}{{ person.name }} · Instructor{% endblock %}
+{% block content %}
+<section class="profile-hero">
+    <div class="container profile-hero-grid">
+        <div class="profile-photo">
+            {% if person.photo %}
+            <img src="{{ url_for('static', filename=person.photo) }}" alt="{{ person.name }}">
+            {% else %}
+            <div class="profile-initials" aria-hidden="true">{{ person.name|initials }}</div>
+            {% endif %}
+        </div>
+        <div class="profile-head">
+            <p class="section-label">Instructor</p>
+            <h1>{{ person.name }}</h1>
+            {% if person.role %}<p class="profile-role">{{ person.role }}</p>{% endif %}
+            {% if person.location %}<p class="profile-meta">📍 {{ person.location }}</p>{% endif %}
+            {% if person.bio %}<p class="profile-lead">{{ person.bio }}</p>{% endif %}
+            {% if person.cv or person.email %}
+            <div class="profile-actions">
+                {% if person.cv %}<a class="button button-primary" href="{{ url_for('static', filename=person.cv) }}" target="_blank" rel="noopener">View CV (PDF)</a>{% endif %}
+                {% if person.email %}<a class="button button-outline" href="mailto:{{ person.email }}">Email</a>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<section class="container profile-body">
+    <div class="profile-main">
+        {% if person.biography %}
+        <div class="profile-block">
+            <h2>About</h2>
+            {% for para in person.biography|paragraphs %}<p>{{ para }}</p>{% endfor %}
+        </div>
+        {% endif %}
+
+        {% if person.teaching_approach %}
+        <div class="profile-block">
+            <h2>How I teach</h2>
+            {% for para in person.teaching_approach|paragraphs %}<p>{{ para }}</p>{% endfor %}
+        </div>
+        {% endif %}
+
+        {% if person.experience %}
+        <div class="profile-block">
+            <h2>Experience</h2>
+            <ol class="timeline">
+                {% for e in person.experience %}
+                <li>
+                    <h3>{{ e.role }}</h3>
+                    {% if e.organization or e.period %}<p class="tl-sub">{{ e.organization }}{% if e.organization and e.period %} · {% endif %}{{ e.period }}</p>{% endif %}
+                    {% if e.details %}<p>{{ e.details }}</p>{% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+        {% if person.education %}
+        <div class="profile-block">
+            <h2>Education</h2>
+            <ol class="timeline">
+                {% for e in person.education %}
+                <li>
+                    <h3>{{ e.degree }}</h3>
+                    {% if e.institution or e.period %}<p class="tl-sub">{{ e.institution }}{% if e.institution and e.period %} · {% endif %}{{ e.period }}</p>{% endif %}
+                    {% if e.details %}<p>{{ e.details }}</p>{% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+        {% if person.certifications %}
+        <div class="profile-block">
+            <h2>Certifications</h2>
+            <ul class="plain-list">
+                {% for c in person.certifications %}
+                <li>
+                    <strong>{% if c.link %}<a href="{{ c.link }}" target="_blank" rel="noopener noreferrer">{{ c.name }}</a>{% else %}{{ c.name }}{% endif %}</strong>
+                    {% if c.issuer or c.year %}<span class="tl-sub"> · {{ c.issuer }}{% if c.issuer and c.year %}, {% endif %}{{ c.year }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if person.achievements %}
+        <div class="profile-block">
+            <h2>Projects &amp; achievements</h2>
+            <ul class="plain-list">
+                {% for a in person.achievements %}
+                <li>
+                    <strong>{% if a.link %}<a href="{{ a.link }}" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>{% else %}{{ a.title }}{% endif %}</strong>
+                    {% if a.year %}<span class="tl-sub"> · {{ a.year }}</span>{% endif %}
+                    {% if a.details %}<br>{{ a.details }}{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% for sec in person.sections %}
+        <div class="profile-block">
+            <h2>{{ sec.title }}</h2>
+            <ul class="plain-list">{% for item in sec['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+        </div>
+        {% endfor %}
+    </div>
+
+    <aside class="profile-side">
+        {% if person.expertise %}
+        <div class="profile-card">
+            <h3>Expertise</h3>
+            <div class="tag-row">{% for t in person.expertise %}<span class="tag">{{ t }}</span>{% endfor %}</div>
+        </div>
+        {% endif %}
+
+        {% if person.languages %}
+        <div class="profile-card">
+            <h3>Languages</h3>
+            <div class="tag-row">{% for t in person.languages %}<span class="tag tag-soft">{{ t }}</span>{% endfor %}</div>
+        </div>
+        {% endif %}
+
+        {% if person.email or person.phone or person.website or person.socials or person.cv %}
+        <div class="profile-card">
+            <h3>Contact &amp; links</h3>
+            <ul class="contact-links">
+                {% if person.email %}<li><span>Email</span><a href="mailto:{{ person.email }}">{{ person.email }}</a></li>{% endif %}
+                {% if person.phone %}<li><span>Phone</span><a href="tel:{{ person.phone_link }}">{{ person.phone }}</a></li>{% endif %}
+                {% if person.website %}<li><span>Website</span><a href="{{ person.website }}" target="_blank" rel="noopener noreferrer">{{ person.website|replace('https://', '')|replace('http://', '')|trim('/') }}</a></li>{% endif %}
+                {% for s in person.socials %}<li><span>{{ s.platform }}</span><a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.url|replace('https://', '')|replace('http://', '')|replace('www.', '')|trim('/') }}</a></li>{% endfor %}
+                {% if person.cv %}<li><span>CV</span><a href="{{ url_for('static', filename=person.cv) }}" target="_blank" rel="noopener">PDF · {{ person.cv_size|filesize }}</a></li>{% endif %}
+            </ul>
+        </div>
+        {% endif %}
+    </aside>
+</section>
+
+{% if courses %}
+<section class="container profile-courses">
+    <div class="section-header">
+        <h2>Courses with {{ person.name.split()[0] }}</h2>
+    </div>
+    <div class="course-grid">
+        {% for course in courses %}
+        {% include "_course_card.html" %}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+{% endblock %}

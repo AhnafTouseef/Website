@@ -1,5 +1,5 @@
 from flask import (Flask, Blueprint, render_template, request, redirect, url_for,
-                   flash, abort, session)
+                   flash, abort, session, jsonify, Response)
 from markupsafe import Markup, escape
 import csv
 import difflib
@@ -17,14 +17,18 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime
+import zipfile
+import zlib
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from importlib import metadata
 
 app = Flask(__name__)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    MAX_CONTENT_LENGTH=8 * 1024 * 1024,   # hard cap for any request body (uploads are capped at 5 MB each)
+    MAX_CONTENT_LENGTH=12 * 1024 * 1024,  # hard cap for any request body (each upload is capped at 5 MB)
 )
 
 
@@ -285,8 +289,227 @@ def _added_info(meta, meta_path):
     return ts, datetime.fromtimestamp(ts).strftime("%Y-%m-%d"), True
 
 
-def load_instructors():
-    """Every instructor folder as a dict: name, role, bio, photo, slug."""
+# ---------------------------------------------------------------------------
+# Discounts. meta.json keeps the intended price as text ("Tk 500.00") plus an optional
+# "discount" percentage. The final price is computed with whole-number maths only, and the
+# admin editor's live preview (JavaScript) uses the very same steps, so they always agree.
+# ---------------------------------------------------------------------------
+
+_PRICE_NUM = re.compile(r"(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?")
+
+
+def _split_price(text):
+    """'Tk 1,500.50/mo' -> ('Tk ', 150050, 2, True, '/mo') = prefix, value scaled by 10**decimals, decimals, uses commas, suffix."""
+    m = _PRICE_NUM.search(text or "")
+    if not m:
+        return None
+    whole, frac = m.group(1), (m.group(2) or "")
+    return (text[:m.start()], int(whole.replace(",", "") + frac[1:]), max(len(frac) - 1, 0),
+            "," in whole, text[m.end():])
+
+
+def parse_discount(raw):
+    """20, '20', '20%', '12.5 %' -> hundredths of a percent (2000, 1250). Empty or 0 -> None. Bad input -> ValueError."""
+    if raw is None or raw is False:
+        return None
+    if raw is True:
+        raise ValueError("Discount must be a number like 20 or 12.5.")
+    text = str(raw).replace("%", "").strip()
+    if text == "":
+        return None
+    # plain digits only (the editor's live preview uses exactly the same rule)
+    if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+        raise ValueError("Discount must be a number like 20 or 12.5.")
+    whole, _, frac = text.partition(".")
+    if frac[2:].strip("0"):
+        raise ValueError("Discount can have at most 2 decimal places.")
+    d100 = int(whole) * 100 + int((frac + "00")[:2])
+    if d100 >= 10000:
+        raise ValueError("Discount must be between 0 and 99.99 percent.")
+    return d100 or None
+
+
+def price_with_discount(price_text, d100):
+    """Price text with `d100` hundredths of a percent taken off, same currency text and number style; None if impossible."""
+    parts = _split_price(price_text)
+    if parts is None or not d100:
+        return None
+    prefix, scaled, decimals, commas, suffix = parts
+    final = (scaled * (10000 - d100) + 5000) // 10000          # half-up rounding, integers only
+    whole, frac = divmod(final, 10 ** decimals)
+    body = f"{whole:,}" if commas else str(whole)
+    if decimals:
+        body += "." + str(frac).zfill(decimals)
+    return f"{prefix}{body}{suffix}"
+
+
+def format_percent(d100):
+    """2000 -> '20', 1250 -> '12.5'."""
+    text = f"{Decimal(d100) / 100:f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _discount_info(meta):
+    """(final_price_text or '', percent_label or '', problem or ''). Problem is a message for the admin diagnostics."""
+    price = _text(meta.get("price"))
+    try:
+        d100 = parse_discount(meta.get("discount"))
+    except ValueError as exc:
+        return "", "", str(exc)
+    if not d100:
+        return "", "", ""
+    final = price_with_discount(price, d100)
+    if final is None:
+        return "", "", "discount is set but price has no number in it, so no discount can be shown"
+    return final, format_percent(d100), ""
+
+
+# Soft background colours for the cards on the Courses page. Assigned from the folder name, so a
+# course keeps its colour between page loads, and a card never matches the ones right next to it.
+CARD_TINTS = ["#e8f1ff", "#e8f8ee", "#fff1de", "#f3e8ff", "#ffe8ee",
+              "#e4f6f8", "#fffbd9", "#eaf0ff", "#eef8dc", "#ffe9e0"]
+
+
+def assign_tints(course_list):
+    used = []
+    for c in course_list:
+        idx = zlib.crc32(c["slug"].encode("utf-8")) % len(CARD_TINTS)
+        while idx in used[-3:]:
+            idx = (idx + 1) % len(CARD_TINTS)
+        used.append(idx)
+        c["tint"] = CARD_TINTS[idx]
+    return course_list
+
+
+# ---------------------------------------------------------------------------
+# Instructor profiles: static/instructors/<folder>/profile.json (+ photo.<ext>, cv.pdf)
+#
+# Only name is really needed. Everything else is optional and a section is simply not shown
+# on the public profile page when it is empty (a fresh graduate has no job experience, and
+# that is fine). Hand-edited JSON is cleaned on load, so a typo can never break a page.
+# ---------------------------------------------------------------------------
+
+EMAIL_RE = re.compile(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$")
+PHONE_RE = re.compile(r"^\+?[\d\s().-]{5,25}$")
+BARE_URL_RE = re.compile(r"^(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?:[/?#]\S*)?$")
+
+# repeatable entries: section -> field names. The first field is the headline of the entry.
+ENTRY_FIELDS = {
+    "education": ("degree", "institution", "period", "details"),
+    "experience": ("role", "organization", "period", "details"),
+    "certifications": ("name", "issuer", "year", "link"),
+    "achievements": ("title", "year", "details", "link"),
+}
+SOCIAL_SUGGESTIONS = ["LinkedIn", "GitHub", "Facebook", "Instagram", "X (Twitter)", "YouTube", "Telegram",
+                      "WhatsApp", "Google Scholar", "ResearchGate", "Behance", "Medium", "Portfolio"]
+PROFILE_KEYS = ["name", "role", "bio", "biography", "teaching_approach", "location", "email", "phone",
+                "website", "socials", "expertise", "languages", "education", "experience",
+                "certifications", "achievements", "sections", "order", "published"]
+CV_NAME = "cv.pdf"
+
+
+def clean_url(text):
+    """('https://…' or '', error). Accepts a bare domain like github.com/me; refuses other schemes (javascript:, data:, …)."""
+    text = _text(text)
+    if not text:
+        return "", None
+    if URL_RE.match(text):
+        return text, None
+    if "://" not in text and ":" not in text.split("/")[0] and BARE_URL_RE.match(text):
+        return "https://" + text, None
+    return "", "must be a web address starting with http:// or https://"
+
+
+def _entries(value, fields):
+    """List of dicts with exactly `fields`; entries without their headline are dropped."""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, str):
+            item = {fields[0]: item}
+        if not isinstance(item, dict):
+            continue
+        entry = {f: _text(item.get(f)) for f in fields}
+        if "link" in entry:
+            entry["link"] = clean_url(entry["link"])[0]
+        if entry[fields[0]]:
+            out.append(entry)
+    return out
+
+
+def _socials(value):
+    out = []
+    if isinstance(value, dict):                       # {"linkedin": "https://…"} also works
+        value = [{"platform": str(k), "url": v} for k, v in value.items()]
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        url = clean_url(item.get("url"))[0]
+        if url:
+            out.append({"platform": _text(item.get("platform")) or "Link", "url": url})
+    return out
+
+
+def _sections(value):
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        items = item.get("items")
+        items = _text_list(items.splitlines() if isinstance(items, str) else items)
+        if _text(item.get("title")) and items:
+            out.append({"title": _text(item.get("title")), "items": items})
+    return out
+
+
+def _instructor_view(folder, data, path):
+    """One instructor as the templates see it (all values already cleaned)."""
+    photo = _find_image(path, "photo")
+    cv_path = os.path.join(path, CV_NAME)
+    email = _text(data.get("email"))
+    phone = _text(data.get("phone"))
+    person = {
+        "slug": folder,
+        "name": _text(data.get("name")) or folder.replace("-", " ").replace("_", " ").title(),
+        "role": _text(data.get("role")),
+        "bio": _text(data.get("bio")),
+        "biography": _text(data.get("biography")),
+        "teaching_approach": _text(data.get("teaching_approach")),
+        "photo": f"instructors/{folder}/{photo}" if photo else None,
+        "order": _int(data.get("order")),
+        "published": not _is_false(data.get("published", True)),
+        "location": _text(data.get("location")),
+        "email": email if EMAIL_RE.match(email) else "",
+        "phone": phone if PHONE_RE.match(phone) else "",
+        "website": clean_url(data.get("website"))[0],
+        "socials": _socials(data.get("socials")),
+        "expertise": _text_list(data.get("expertise")),
+        "languages": _text_list(data.get("languages")),
+        "cv": f"instructors/{folder}/{CV_NAME}" if os.path.isfile(cv_path) else None,
+        "cv_size": os.path.getsize(cv_path) if os.path.isfile(cv_path) else 0,
+        "sections": _sections(data.get("sections")),
+    }
+    for key, fields in ENTRY_FIELDS.items():
+        person[key] = _entries(data.get(key), fields)
+    person["phone_link"] = re.sub(r"[^\d+]", "", phone) if person["phone"] else ""
+    return person
+
+
+# what a profile can hold, for the "how complete is it" checklist (label, test)
+PROFILE_CHECKS = [
+    ("photo", "Photo", lambda p: bool(p["photo"])),
+    ("bio", "Short description", lambda p: bool(p["bio"])),
+    ("biography", "Biography", lambda p: bool(p["biography"])),
+    ("contact", "Contact or links", lambda p: bool(p["email"] or p["phone"] or p["website"] or p["socials"])),
+    ("cv", "CV", lambda p: bool(p["cv"])),
+    ("expertise", "Expertise", lambda p: bool(p["expertise"])),
+    ("education", "Education", lambda p: bool(p["education"])),
+    ("experience", "Experience", lambda p: bool(p["experience"])),
+    ("more", "Certificates / projects", lambda p: bool(p["certifications"] or p["achievements"] or p["sections"])),
+]
+
+
+def load_instructors(include_hidden=False):
+    """Every instructor folder as a dict (see _instructor_view). Hidden ones only when include_hidden."""
     root = _instructors_dir()
     people = []
     for folder in _subfolders(root):
@@ -299,17 +522,23 @@ def load_instructors():
         else:
             log.warning("Instructor folder '%s' has no profile.json; using the folder name", folder)
             data = {}
-        photo = _find_image(path, "photo")
-        people.append({
-            "slug": folder,
-            "name": _text(data.get("name")) or folder.replace("-", " ").replace("_", " ").title(),
-            "role": _text(data.get("role")),
-            "bio": _text(data.get("bio")),
-            "photo": f"instructors/{folder}/{photo}" if photo else None,
-            "order": _int(data.get("order")),
-        })
+        person = _instructor_view(folder, data, path)
+        if person["published"] or include_hidden:
+            people.append(person)
     people.sort(key=lambda p: (p["order"], p["name"].casefold()))
     return people
+
+
+@app.template_filter("paragraphs")
+def _paragraphs(text):
+    """Split free text into paragraphs at blank lines (single line breaks stay inside a paragraph)."""
+    return [part.strip() for part in re.split(r"\n\s*\n", text or "") if part.strip()]
+
+
+@app.template_filter("initials")
+def _initials(name):
+    parts = [p for p in re.split(r"\s+", name or "") if p]
+    return "".join(p[0] for p in (parts[:1] + parts[-1:] if len(parts) > 1 else parts)).upper()
 
 
 def _instructor_index(instructors):
@@ -320,51 +549,97 @@ def _instructor_index(instructors):
     return index
 
 
-_WEEK_HEADERS = ("week", "week_range", "weeks", "title")
+# ---------------------------------------------------------------------------
+# Curriculum = the instructor's own sheet, shown exactly as written.
+#
+# curriculum.csv can have ANY columns and ANY rows. Nothing is mapped, grouped or renamed:
+# the first row is the table header, every other row is shown as it is. The only tidying is
+# dropping empty rows at the top/bottom and columns that have no content at all.
+# ---------------------------------------------------------------------------
+
+MAX_SHEET_COLS = 40
 
 
-def _parse_curriculum(rows):
-    """rows: iterable of lists (csv rows). Columns: week, topic. Blank week = same week as the row above."""
-    rows = list(rows)
-    if not rows:
+def _cell_text(value):
+    return "" if value is None else str(value).replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def normalize_grid(rows):
+    """Clean list of equal-length rows of strings, or [] when the sheet has no content."""
+    grid = [[_cell_text(c) for c in row] for row in rows]
+    while grid and not any(grid[-1]):
+        grid.pop()
+    while grid and not any(grid[0]):
+        grid.pop(0)
+    if not grid:
         return []
-    first = _norm(rows[0][0]) if rows[0] else ""
-    if first in _WEEK_HEADERS:          # a file without a header row is fine too
-        rows = rows[1:]
-    groups = {}
-    current = None
-    for row in rows:
-        if not row or not any(cell.strip() for cell in row):
+    width = max(len(r) for r in grid)
+    grid = [r + [""] * (width - len(r)) for r in grid]
+    keep = [j for j in range(width) if any(r[j] for r in grid)]
+    return [[r[j] for j in keep] for r in grid]
+
+
+def parse_sheet(rows):
+    """Table for the public page: {'header': [...], 'rows': [[{'text', 'cont'}]], 'ncols', 'nrows'} or None.
+
+    `cont` marks an empty cell sitting under a filled cell of the same column: Excel users merge cells
+    that way, so the page draws it joined to the cell above instead of as a separate empty box.
+    """
+    grid = normalize_grid(rows)
+    if not grid:
+        return None
+    header, body = grid[0], grid[1:]
+    chain = [False] * len(header)
+    table = []
+    for row in body:
+        if not any(row):
+            table.append([{"text": "", "cont": False} for _ in row])
+            chain = [False] * len(header)
             continue
-        week = row[0].strip() if len(row) > 0 else ""
-        topic = row[1].strip() if len(row) > 1 else ""
-        if week:
-            current = week
-        if current is None:
-            continue
-        bucket = groups.setdefault(current, [])
-        if topic:
-            bucket.append(topic)
-    return [{"week_range": week, "details": details} for week, details in groups.items()]
+        cells = []
+        for j, text in enumerate(row):
+            cont = (not text) and chain[j]
+            cells.append({"text": text, "cont": cont})
+            chain[j] = bool(text) or cont
+        table.append(cells)
+    return {"header": header, "rows": table, "ncols": len(header), "nrows": len(body)}
 
 
 def _load_curriculum(path):
     if not os.path.isfile(path):
         log.warning("Missing file: %s", path)
-        return []
+        return None
     try:
         with open(path, encoding="utf-8-sig", newline="") as fh:
-            return _parse_curriculum(csv.reader(fh))
+            return parse_sheet(csv.reader(fh))
     except (OSError, csv.Error, UnicodeDecodeError) as exc:
         log.error("Could not read %s: %s", path, exc)
-        return []
+        return None
 
 
-def load_courses(instructors=None):
+_URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+@app.template_filter("cell")
+def _cell_filter(text):
+    """A sheet cell as safe HTML: line breaks kept, web addresses turned into links."""
+    text = text or ""
+    out, pos = [], 0
+    for m in _URL_IN_TEXT.finditer(text):
+        url = m.group(0).rstrip(".,;:!?)")
+        end = m.start() + len(url)
+        out.append(escape(text[pos:m.start()]))
+        out.append(Markup('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>') % (url, url))
+        pos = end
+    out.append(escape(text[pos:]))
+    return Markup("").join(out).replace("\n", Markup("<br>"))
+
+
+def load_courses():
     """Every published course folder, sorted by 'order' then title."""
-    if instructors is None:
-        instructors = load_instructors()
-    index = _instructor_index(instructors)
+    everyone = load_instructors(include_hidden=True)
+    index = _instructor_index([p for p in everyone if p["published"]])
+    hidden = _instructor_index([p for p in everyone if not p["published"]])
     root = _courses_dir()
     courses = []
     for folder in _subfolders(root):
@@ -378,6 +653,8 @@ def load_courses(instructors=None):
         team = []
         for name in _text_list(meta.get("instructors")):
             person = index.get(_norm(name))
+            if person is None and _norm(name) in hidden:
+                continue                  # a hidden instructor is not shown anywhere on the public site
             if person is None:
                 log.warning("Course '%s' lists instructor '%s' but no matching folder in static/instructors", folder, name)
                 person = {"slug": None, "name": name, "role": "", "bio": "", "photo": None, "order": 100}
@@ -386,6 +663,9 @@ def load_courses(instructors=None):
         thumb = _find_image(path, "thumbnail")
         subtitle = _text(meta.get("subtitle"))
         added_ts, added_label, _ = _added_info(meta, os.path.join(path, "meta.json"))
+        final_price, discount_label, problem = _discount_info(meta)
+        if problem:
+            log.warning("Course '%s': %s", folder, problem)
         courses.append({
             "slug": folder,
             "title": _text(meta.get("title")) or folder.replace("-", " ").replace("_", " ").title(),
@@ -395,7 +675,11 @@ def load_courses(instructors=None):
             "duration": _text(meta.get("duration")),
             "capacity": _text(meta.get("capacity")),
             "certificate": _text(meta.get("certificate")),
-            "price": _text(meta.get("price")),
+            # `price` is what a visitor pays (discounted when a discount is set);
+            # `price_original` / `discount` are only filled for discounted courses.
+            "price": final_price or _text(meta.get("price")),
+            "price_original": _text(meta.get("price")) if final_price else "",
+            "discount": discount_label,
             "start_date": _text(meta.get("start_date")),
             "enroll_link": _text(meta.get("enroll_link")),
             "webinar_link": _text(meta.get("webinar_link")),
@@ -451,7 +735,7 @@ def home():
 def courses():
     return render_template(
         "courses.html",
-        courses=load_courses(),
+        courses=assign_tints(load_courses()),
         pipeline_courses=pipeline_courses
     )
 
@@ -470,6 +754,15 @@ def course_details(slug):
         if course is None:
             abort(404)
     return render_template("course_details.html", course=course)
+
+@app.route("/instructor/<slug>")
+def instructor_profile(slug):
+    people = load_instructors()
+    person = next((p for p in people if p["slug"] == slug), None)
+    if person is None:
+        abort(404)
+    taught = [c for c in load_courses() if any(i.get("slug") == slug for i in c["instructors"])]
+    return render_template("instructor.html", person=person, courses=assign_tints(taught))
 
 @app.route("/webinar", methods=["GET", "POST"])
 def webinar():
@@ -518,12 +811,13 @@ admin_bp = Blueprint("admin", __name__, url_prefix=ADMIN_PREFIX)
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 RESERVED_SLUGS = {"new"}
 URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+TRASH_INSTRUCTOR_PREFIX = "instructor--"      # course slugs never contain "--", so the two kinds cannot clash
 TRASH_RE = re.compile(r"^(?P<slug>[^/\\\x00]+?)__(?P<ts>\d{8}-\d{6})(?:-\d+)?$")
 
 STRING_KEYS = ["title", "tagline", "subtitle", "description", "duration", "capacity",
                "certificate", "price", "start_date", "enroll_link", "webinar_link"]
 LIST_KEYS = ["features", "what_you_will_learn", "instructors"]
-META_KEYS = STRING_KEYS + LIST_KEYS + ["order", "added", "published"]
+META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published"]
 
 ADMIN_IDLE_SECONDS = 8 * 3600
 UPLOAD_LIMIT = 5 * 1024 * 1024
@@ -742,6 +1036,18 @@ def _course_path(slug):
     return path
 
 
+def _instructor_path(slug):
+    """Absolute path of an existing instructor folder, or 404 (same guards as _course_path)."""
+    root = _instructors_dir()
+    if (not slug or slug in (".", "..") or slug.startswith((".", "_"))
+            or slug != os.path.basename(slug) or "\\" in slug or "\x00" in slug):
+        abort(404)
+    path = os.path.join(root, slug)
+    if not os.path.isdir(path) or os.path.dirname(os.path.realpath(path)) != os.path.realpath(root):
+        abort(404)
+    return path
+
+
 def _unique_slug(base, root=None):
     root = root or _courses_dir()
     if not os.path.exists(os.path.join(root, base)):
@@ -752,15 +1058,9 @@ def _unique_slug(base, root=None):
     return f"{base}-{n}"
 
 
-def _curriculum_to_csv(groups):
+def _grid_to_csv(grid):
     buf = io.StringIO()
-    writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow(["week", "topic"])
-    for group in groups:
-        if not group["details"]:
-            writer.writerow([group["week_range"], ""])
-        for i, topic in enumerate(group["details"]):
-            writer.writerow([group["week_range"] if i == 0 else "", topic])
+    csv.writer(buf, lineterminator="\n").writerows(grid)
     return buf.getvalue()
 
 
@@ -770,12 +1070,12 @@ def _dump_meta(meta):
     return json.dumps(ordered, indent=4, ensure_ascii=False) + "\n"
 
 
-def _remove_thumbnails(path, keep=None):
-    """Delete every thumbnail.* image except the file named `keep` (compared by identity, so it is safe on Windows)."""
+def _remove_thumbnails(path, keep=None, stem="thumbnail"):
+    """Delete every <stem>.* image except the file named `keep` (compared by identity, so it is safe on Windows)."""
     keep_path = os.path.join(path, keep) if keep else None
     for name in os.listdir(path):
         base, ext = os.path.splitext(name)
-        if base.lower() != "thumbnail" or ext.lower() not in IMAGE_EXTS:
+        if base.lower() != stem or ext.lower() not in IMAGE_EXTS:
             continue
         full = os.path.join(path, name)
         if keep_path and os.path.exists(keep_path) and os.path.samefile(full, keep_path):
@@ -788,7 +1088,7 @@ def _remove_thumbnails(path, keep=None):
 def scan_courses():
     """Every course folder, including hidden and broken ones, with diagnostics."""
     root = _courses_dir()
-    instructors = load_instructors()
+    instructors = load_instructors(include_hidden=True)
     index = _instructor_index(instructors)
     entries = []
     for folder in _subfolders(root):
@@ -829,6 +1129,9 @@ def scan_courses():
                     add("warn", f"{key} is not an http(s) URL: {value}")
             if not _text(meta.get("price")):
                 add("info", "no price set")
+            _, _, discount_problem = _discount_info(meta)
+            if discount_problem:
+                add("warn", discount_problem)
             if _text(meta.get("added")) and not _valid_date(_text(meta.get("added"))):
                 add("warn", f"'added' must look like 2026-10-26 (got '{_text(meta.get('added'))}'); the file's modified time is used instead")
             elif not _text(meta.get("added")):
@@ -854,17 +1157,17 @@ def scan_courses():
 
         csv_path = os.path.join(path, "curriculum.csv")
         csv_text = _read_text(csv_path)
-        weeks = topics = 0
+        rows = cols = 0
         if csv_text is None:
             add("warn" if not os.path.isfile(csv_path) else "error",
                 "curriculum.csv not found" if not os.path.isfile(csv_path) else "curriculum.csv is not readable as UTF-8")
         else:
             try:
-                groups = _parse_curriculum(csv.reader(io.StringIO(csv_text, newline="")))
-                weeks = len(groups)
-                topics = sum(len(g["details"]) for g in groups)
-                if not groups:
-                    add("warn", "curriculum.csv has no weeks (the Curriculum section is hidden)")
+                sheet = parse_sheet(csv.reader(io.StringIO(csv_text, newline="")))
+                if sheet:
+                    rows, cols = sheet["nrows"], sheet["ncols"]
+                else:
+                    add("warn", "curriculum.csv is empty (the Curriculum section is hidden)")
             except csv.Error as exc:
                 add("error", f"curriculum.csv: {exc}")
 
@@ -884,6 +1187,7 @@ def scan_courses():
         files.sort(key=lambda f: f["name"])
 
         added_label = _added_info(meta, meta_path)[1] if not err else ""
+        final_price, discount_label, _ = _discount_info(meta) if not err else ("", "", "")
 
         entries.append({
             "slug": folder,
@@ -892,9 +1196,11 @@ def scan_courses():
             "title": _text(meta.get("title")) or folder,
             "tagline": _text(meta.get("tagline")),
             "price": _text(meta.get("price")),
+            "price_final": final_price,
+            "discount": discount_label,
             "order": _int(meta.get("order")) if not err else None,
-            "weeks": weeks,
-            "topics": topics,
+            "rows": rows,
+            "cols": cols,
             "instructor_names": names,
             "thumb": f"course/{folder}/{thumb}" if thumb else None,
             "files": files,
@@ -929,12 +1235,21 @@ def _trash_items():
         m = TRASH_RE.match(name)
         if not m or name.startswith(".") or not os.path.isdir(path):
             continue
-        meta, _ = _read_json_checked(os.path.join(path, "meta.json"))
+        slug = m.group("slug")
+        kind = "instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX) else "course"
+        if kind == "instructor":
+            slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
+            meta, _ = _read_json_checked(os.path.join(path, "profile.json"))
+            title = _text((meta or {}).get("name"))
+        else:
+            meta, _ = _read_json_checked(os.path.join(path, "meta.json"))
+            title = _text((meta or {}).get("title"))
         size, count, _ = _tree_stats(path)
         items.append({
             "name": name,
-            "slug": m.group("slug"),
-            "title": _text((meta or {}).get("title")) or m.group("slug"),
+            "kind": kind,
+            "slug": slug,
+            "title": title or slug,
             "deleted": datetime.strptime(m.group("ts"), "%Y%m%d-%H%M%S").timestamp(),
             "size": size,
             "files": count,
@@ -993,7 +1308,7 @@ def logout():
 @admin_bp.route("/")
 def dashboard():
     courses_ = scan_courses()
-    instructors = load_instructors()
+    instructors = load_instructors(include_hidden=True)
     used = {}
     for c in courses_:
         for name in c["instructor_names"]:
@@ -1005,8 +1320,7 @@ def dashboard():
         "published": sum(1 for c in courses_ if c["status"] == "published"),
         "hidden": sum(1 for c in courses_ if c["status"] == "hidden"),
         "broken": sum(1 for c in courses_ if c["status"] == "broken"),
-        "weeks": sum(c["weeks"] for c in courses_),
-        "topics": sum(c["topics"] for c in courses_),
+        "rows": sum(c["rows"] for c in courses_),
         "no_thumb": sum(1 for c in courses_ if c["status"] != "broken" and not c["thumb"]),
         "instructors": len(instructors),
         "bytes": sum(c["size"] for c in courses_),
@@ -1014,6 +1328,427 @@ def dashboard():
         "warnings": sum(c["n_warn"] for c in courses_),
     }
     return render_template("admin_dashboard.html", courses=courses_, stats=stats, instructors=instructors)
+
+
+# ---------- curriculum import (csv / xlsx), used by the editor's file drop-zone ----------
+#
+# The editor sends the chosen file here; the reply is clean CSV text that the page puts into the
+# curriculum box so you can review it before saving. Nothing is written to disk by this route.
+# .xlsx is read with the standard library only (an .xlsx is a zip of XML files), so there is nothing
+# extra to install. Guards: size limits, no DOCTYPE/entity tricks in the XML, only the first sheet,
+# only the first two columns.
+
+IMPORT_LIMIT = 2 * 1024 * 1024
+XLSX_PART_LIMIT = 8 * 1024 * 1024
+IMPORT_MAX_ROWS = 2000
+CURRICULUM_TEMPLATE = (
+    "Week,Topic,Hours\n"
+    "Week 1,Variables & data types,3\n"
+    "Week 2,\"Lists, dictionaries, sets\",4\n"
+)
+
+
+def _decode_text(data):
+    for encoding in ("utf-8-sig", "cp1252"):      # Excel on Windows saves "CSV" as cp1252
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1")
+
+
+def _csv_rows(data):
+    text = _decode_text(data)
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    delimiter = max((",", ";", "\t"), key=first.count) if any(d in first for d in ",;\t") else ","
+    rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+    return rows
+
+
+def _local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_part(archive, name):
+    """Parsed XML of one workbook part, refusing oversized parts and anything with a DOCTYPE/entities."""
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return None
+    if info.file_size > XLSX_PART_LIMIT:
+        raise ValueError("That workbook is too large to import.")
+    raw = archive.read(name)
+    lowered = raw.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise ValueError("That workbook contains unsupported XML and was not imported.")
+    try:
+        return ET.fromstring(raw)
+    except ET.ParseError:
+        raise ValueError("That workbook could not be read (damaged XML).") from None
+
+
+def _node_text(node):
+    """Text of a shared-string / inline-string node (plain or rich text, phonetic hints ignored)."""
+    out = []
+    for child in node:
+        name = _local(child.tag)
+        if name == "t":
+            out.append(child.text or "")
+        elif name == "r":
+            out.extend((t.text or "") for t in child if _local(t.tag) == "t")
+    return "".join(out)
+
+
+def _column_index(ref):
+    letters = re.match(r"[A-Za-z]+", ref or "")
+    if not letters:
+        return None
+    n = 0
+    for ch in letters.group(0).upper():
+        n = n * 26 + (ord(ch) - 64)
+    return n - 1
+
+
+# ---- how Excel shows numbers and dates (so a cell reads in the file the way it reads in Excel) ----
+
+_BUILTIN_FORMATS = {
+    1: "0", 2: "0.00", 3: "#,##0", 4: "#,##0.00", 9: "0%", 10: "0.00%",
+    14: "yyyy-mm-dd", 15: "d-mmm-yy", 16: "d-mmm", 17: "mmm-yy", 18: "h:mm AM/PM", 19: "h:mm:ss AM/PM",
+    20: "h:mm", 21: "h:mm:ss", 22: "yyyy-mm-dd h:mm", 37: "#,##0", 38: "#,##0", 39: "#,##0.00",
+    40: "#,##0.00", 45: "mm:ss", 46: "h:mm:ss", 47: "mm:ss.0", 49: "@",
+}
+for _i in list(range(27, 37)) + list(range(50, 59)):
+    _BUILTIN_FORMATS.setdefault(_i, "yyyy-mm-dd")      # locale-specific date formats
+
+_FMT_TOKEN = re.compile(
+    r'"[^"]*"|\\.|_.|\*.|\[[^\]]*\]|[AaPp][Mm]/[AaPp][Mm]|[Aa]/[Pp]|[Ee][+-]|[yY]+|[mM]+|[dD]+|[hH]+|[sS]+|.', re.S)
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December"]
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _fmt_tokens(code):
+    out = []
+    for m in _FMT_TOKEN.finditer(code or ""):
+        t = m.group(0)
+        if t[0] == '"':
+            out.append(("lit", t[1:-1]))
+        elif t[0] == "\\":
+            out.append(("lit", t[1:]))
+        elif t[0] == "_":
+            out.append(("lit", " "))
+        elif t[0] == "*":
+            continue
+        elif t[0] == "[":
+            inner = t[1:-1]
+            if re.fullmatch(r"[hHmMsS]+", inner):
+                out.append((inner[0].lower(), inner.lower()))      # elapsed time: treated like the normal token
+            elif inner.startswith("$"):
+                out.append(("lit", inner[1:].split("-")[0]))       # [$৳-445] -> ৳
+        elif t.lower() in ("am/pm", "a/p"):
+            out.append(("ampm", t))
+        elif t[0] in "eE" and len(t) == 2:
+            out.append(("sci", t))
+        elif t[0] in "yY":
+            out.append(("y", t.lower()))
+        elif t[0] in "mM":
+            out.append(("m", t.lower()))
+        elif t[0] in "dD":
+            out.append(("d", t.lower()))
+        elif t[0] in "hH":
+            out.append(("h", t.lower()))
+        elif t[0] in "sS":
+            out.append(("s", t.lower()))
+        else:
+            out.append(("other", t))
+    return out
+
+
+def _format_date(serial, tokens, date1904):
+    base = datetime(1904, 1, 1) if date1904 else datetime(1899, 12, 30)
+    dt = base + timedelta(seconds=round(float(serial) * 86400))
+    clock = ("y", "m", "d", "h", "s", "ampm")
+    twelve = any(k == "ampm" for k, _ in tokens)
+    out = []
+    for i, (kind, t) in enumerate(tokens):
+        if kind == "y":
+            out.append(f"{dt.year:04d}" if len(t) > 2 else f"{dt.year % 100:02d}")
+        elif kind == "m":
+            prev = next((tokens[j][0] for j in range(i - 1, -1, -1) if tokens[j][0] in clock), None)
+            nxt = next((tokens[j][0] for j in range(i + 1, len(tokens)) if tokens[j][0] in clock), None)
+            if prev == "h" or nxt == "s":
+                out.append(f"{dt.minute:02d}" if len(t) > 1 else str(dt.minute))
+            elif len(t) == 1:
+                out.append(str(dt.month))
+            elif len(t) == 2:
+                out.append(f"{dt.month:02d}")
+            elif len(t) == 3:
+                out.append(_MONTHS[dt.month - 1][:3])
+            elif len(t) == 4:
+                out.append(_MONTHS[dt.month - 1])
+            else:
+                out.append(_MONTHS[dt.month - 1][0])
+        elif kind == "d":
+            if len(t) == 1:
+                out.append(str(dt.day))
+            elif len(t) == 2:
+                out.append(f"{dt.day:02d}")
+            elif len(t) == 3:
+                out.append(_DAYS[dt.weekday()][:3])
+            else:
+                out.append(_DAYS[dt.weekday()])
+        elif kind == "h":
+            hour = (dt.hour % 12 or 12) if twelve else dt.hour
+            out.append(f"{hour:02d}" if len(t) > 1 else str(hour))
+        elif kind == "s":
+            out.append(f"{dt.second:02d}" if len(t) > 1 else str(dt.second))
+        elif kind == "ampm":
+            out.append(("AM" if dt.hour < 12 else "PM") if len(t) > 3 else ("A" if dt.hour < 12 else "P"))
+        else:
+            out.append(t)
+    return "".join(out)
+
+
+def _general_number(raw):
+    try:
+        x = float(raw)
+    except ValueError:
+        return raw
+    if x.is_integer() and abs(x) < 1e15:
+        return str(int(x))
+    return format(x, ".15g")
+
+
+def _format_number(raw, tokens):
+    x = float(raw)
+    sections = [[]]
+    for tok in tokens:
+        if tok == ("other", ";"):
+            sections.append([])
+        else:
+            sections[-1].append(tok)
+    chosen, sign = sections[0], ""
+    if x < 0:
+        if len(sections) > 1:
+            chosen = sections[1]
+        else:
+            sign = "-"
+    elif x == 0 and len(sections) > 2:
+        chosen = sections[2]
+    run = [i for i, (k, t) in enumerate(chosen) if k == "other" and t in "#0?,."]
+    if not run:
+        return _general_number(raw)
+    first, last = run[0], run[-1]
+    pattern = "".join(chosen[i][1] for i in range(first, last + 1))
+    if any(chosen[i][0] != "other" or chosen[i][1] not in "#0?,." for i in range(first, last + 1)):
+        return _general_number(raw)               # something odd inside the number pattern
+    percent = any(k == "other" and t == "%" for k, t in chosen)
+    int_part, _, dec_part = pattern.partition(".")
+    min_dec = dec_part.count("0")
+    max_dec = len(dec_part.replace(",", ""))
+    value = abs(Decimal(repr(x)))
+    if percent:
+        value *= 100
+    value = value.quantize(Decimal(1).scaleb(-max_dec), rounding=ROUND_HALF_UP)
+    text = f"{value:,.{max_dec}f}" if "," in int_part else f"{value:.{max_dec}f}"
+    if "." in text:
+        whole, frac = text.split(".")
+        frac = frac.rstrip("0").ljust(min_dec, "0")
+        text = whole + ("." + frac if frac else "")
+    zeros = int_part.replace(",", "").count("0")
+    if zeros and "," not in text:
+        whole, dot, frac = text.partition(".")
+        text = whole.zfill(zeros) + dot + frac
+    before = "".join(t for _, t in chosen[:first])
+    after = "".join(t for _, t in chosen[last + 1:])
+    return sign + before + text + after
+
+
+def _format_cell_number(raw, code, date1904):
+    """Number cell as Excel would display it, falling back to the plain number."""
+    try:
+        float(raw)
+    except ValueError:
+        return raw
+    code = code or "General"
+    if code.strip().lower() in ("general", "@", ""):
+        return _general_number(raw)
+    tokens = _fmt_tokens(code)
+    try:
+        if any(k == "sci" for k, _ in tokens):
+            return _general_number(raw)
+        if any(k in ("y", "d", "h", "s", "ampm", "m") for k, _ in tokens):
+            return _format_date(raw, tokens, date1904)
+        return _format_number(raw, tokens)
+    except (ValueError, OverflowError, InvalidOperation):
+        return _general_number(raw)
+
+
+def _xlsx_rows(data):
+    """(rows, note) of the first visible-order sheet. Hidden rows/columns are left out, like in Excel."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise ValueError("That file is not a valid .xlsx workbook.") from None
+    names = archive.namelist()
+
+    shared = []
+    sst = _xml_part(archive, "xl/sharedStrings.xml")
+    if sst is not None:
+        shared = [_node_text(si) for si in sst if _local(si.tag) == "si"]
+
+    # number formats: cell style index -> format code
+    style_codes = []
+    styles = _xml_part(archive, "xl/styles.xml")
+    if styles is not None:
+        custom = {}
+        for node in styles.iter():
+            if _local(node.tag) == "numFmt":
+                custom[node.get("numFmtId")] = node.get("formatCode") or ""
+        for xfs in styles.iter():
+            if _local(xfs.tag) == "cellXfs":
+                for xf in xfs:
+                    fid = xf.get("numFmtId") or "0"
+                    style_codes.append(custom.get(fid) or _BUILTIN_FORMATS.get(_int(fid, 0), "General"))
+    date1904 = False
+
+    # first sheet in tab order, falling back to sheet1.xml
+    sheet_path = None
+    sheet_names = []
+    workbook = _xml_part(archive, "xl/workbook.xml")
+    rels = _xml_part(archive, "xl/_rels/workbook.xml.rels")
+    if workbook is not None and rels is not None:
+        targets = {r.get("Id"): r.get("Target") for r in rels}
+        for node in workbook.iter():
+            if _local(node.tag) == "workbookPr" and (node.get("date1904") or "").lower() in ("1", "true"):
+                date1904 = True
+            if _local(node.tag) == "sheet":
+                sheet_names.append(node.get("name") or "")
+                if sheet_path is None:
+                    rid = next((v for k, v in node.attrib.items() if _local(k) == "id"), None)
+                    target = targets.get(rid)
+                    if target:
+                        target = target.lstrip("/")
+                        sheet_path = target if target.startswith("xl/") else "xl/" + target
+    if sheet_path not in names:
+        sheet_path = "xl/worksheets/sheet1.xml" if "xl/worksheets/sheet1.xml" in names else next(
+            (n for n in sorted(names) if n.startswith("xl/worksheets/") and n.endswith(".xml")), None)
+    if sheet_path is None:
+        raise ValueError("No worksheet found. Is this a real .xlsx file?")
+    sheet = _xml_part(archive, sheet_path)
+
+    hidden_cols = set()
+    for node in sheet.iter():
+        if _local(node.tag) == "col" and (node.get("hidden") or "").lower() in ("1", "true"):
+            lo, hi = _int(node.get("min"), 0), min(_int(node.get("max"), 0), MAX_SHEET_COLS + 1)
+            hidden_cols.update(range(lo - 1, hi))
+
+    cells_by_row = {}
+    auto_row = 0
+    for row in sheet.iter():
+        if _local(row.tag) != "row":
+            continue
+        auto_row += 1
+        rownum = _int(row.get("r"), auto_row)
+        auto_row = rownum
+        if (row.get("hidden") or "").lower() in ("1", "true"):
+            continue
+        next_col = 0
+        values = {}
+        for cell in row:
+            if _local(cell.tag) != "c":
+                continue
+            col = _column_index(cell.get("r"))
+            col = next_col if col is None else col
+            next_col = col + 1
+            if col in hidden_cols:
+                continue
+            kind = cell.get("t")
+            value_node = next((c for c in cell if _local(c.tag) == "v"), None)
+            raw = (value_node.text or "") if value_node is not None else ""
+            if kind == "s":
+                value = shared[int(raw)] if raw.isdigit() and int(raw) < len(shared) else ""
+            elif kind == "inlineStr":
+                is_node = next((c for c in cell if _local(c.tag) == "is"), None)
+                value = _node_text(is_node) if is_node is not None else ""
+            elif kind == "b":
+                value = "TRUE" if raw == "1" else "FALSE"
+            elif kind == "e":
+                value = ""
+            elif kind in (None, "n"):
+                style = _int(cell.get("s"), 0)
+                code = style_codes[style] if style < len(style_codes) else "General"
+                value = _format_cell_number(raw, code, date1904) if raw != "" else ""
+            else:                                  # formula strings, ISO dates
+                value = raw
+            if value.strip():
+                if col >= MAX_SHEET_COLS:
+                    raise ValueError(f"More than {MAX_SHEET_COLS} columns. Keep the curriculum sheet narrower.")
+                values[col] = value
+        if values:
+            if rownum > IMPORT_MAX_ROWS:
+                raise ValueError(f"More than {IMPORT_MAX_ROWS} rows; split the curriculum into a smaller sheet.")
+            cells_by_row[rownum] = values
+
+    rows = []
+    if cells_by_row:
+        width = max(max(v) for v in cells_by_row.values()) + 1
+        for n in range(min(cells_by_row), max(cells_by_row) + 1):
+            values = cells_by_row.get(n, {})
+            rows.append([values.get(c, "") for c in range(width)])
+    note = ""
+    if sheet_names:
+        note = f"sheet '{sheet_names[0]}'" + (f" (the workbook has {len(sheet_names)} sheets; only the first is imported)" if len(sheet_names) > 1 else "")
+    return rows, note
+
+
+def _import_rows(data):
+    """(rows, kind, note) from uploaded bytes. The file's real content decides the type, not its name."""
+    if data[:4] == b"PK\x03\x04":
+        rows, note = _xlsx_rows(data)
+        return rows, "xlsx", note
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        raise ValueError("Old .xls files are not supported. In Excel use Save As and pick .xlsx or CSV.")
+    if b"\x00" in data[:4096]:
+        raise ValueError("That looks like a binary file. Upload a .csv or .xlsx file.")
+    return _csv_rows(data), "csv", ""
+
+
+def _grid_error(grid):
+    """Message when a sheet is too big to store, else None."""
+    if len(grid) > IMPORT_MAX_ROWS:
+        return f"The curriculum has more than {IMPORT_MAX_ROWS} rows."
+    if grid and len(grid[0]) > MAX_SHEET_COLS:
+        return f"The curriculum has more than {MAX_SHEET_COLS} columns."
+    return None
+
+
+@admin_bp.post("/curriculum/import")
+def curriculum_import():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(ok=False, error="Choose a .csv or .xlsx file first."), 400
+    data = upload.read(IMPORT_LIMIT + 1)
+    if len(data) > IMPORT_LIMIT:
+        return jsonify(ok=False, error="That file is larger than 2 MB."), 400
+    try:
+        rows, kind, note = _import_rows(data)
+        grid = normalize_grid(rows)
+    except (ValueError, csv.Error) as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    if not grid:
+        return jsonify(ok=False, error="The file has no data in it."), 400
+    problem = _grid_error(grid)
+    if problem:
+        return jsonify(ok=False, error=problem), 400
+    log.info("admin: imported curriculum from a %s file (%d rows x %d columns)", kind, len(grid), len(grid[0]))
+    return jsonify(ok=True, csv=_grid_to_csv(grid), kind=kind, rows=len(grid) - 1, cols=len(grid[0]), note=note)
+
+
+@admin_bp.route("/curriculum/template.csv")
+def curriculum_template():
+    return Response("﻿" + CURRICULUM_TEMPLATE, mimetype="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="curriculum-template.csv"'})
 
 
 @admin_bp.route("/trash")
@@ -1058,7 +1793,7 @@ def system():
         "Server time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     return render_template("admin_system.html", info=info, routes=routes, logos=logos,
-                           logs=_logbook.recent(), instructors=load_instructors(),
+                           logs=_logbook.recent(), instructors=load_instructors(include_hidden=True),
                            pipeline_count=len(pipeline_courses), faq_count=len(faq_questions))
 
 
@@ -1069,6 +1804,7 @@ def _form_from_meta(meta, csv_text, slug, added=""):
     return {
         "slug": slug or "",
         "added": added,
+        "discount": _text(meta.get("discount")),
         **{k: _text(meta.get(k)) for k in STRING_KEYS},
         "features": "\n".join(_text_list(meta.get("features"))),
         "what_you_will_learn": "\n".join(_text_list(meta.get("what_you_will_learn"))),
@@ -1090,6 +1826,7 @@ def _read_submission(creating, existing_meta, added_default):
     form = {
         "slug": f.get("slug", "").strip().lower() if creating else "",
         "added": f.get("added", "").strip(),
+        "discount": f.get("discount", "").strip(),
         **{k: f.get(k, "").strip() for k in STRING_KEYS},
         "features": f.get("features", ""),
         "what_you_will_learn": f.get("what_you_will_learn", ""),
@@ -1118,14 +1855,20 @@ def _read_submission(creating, existing_meta, added_default):
             errors.append(f"{key} must start with http:// or https:// (or be left empty).")
     if form["added"] and not _valid_date(form["added"]):
         errors.append("Added date must look like 2026-10-26 (year-month-day), or be left empty.")
-
-    groups = []
+    d100 = None
     try:
-        rows = list(csv.reader(io.StringIO(form["csv"], newline="")))
-        groups = _parse_curriculum(rows)
-        body = rows[1:] if rows and rows[0] and _norm(rows[0][0]) in _WEEK_HEADERS else rows
-        if not groups and any(any(cell.strip() for cell in row) for row in body):
-            errors.append("Curriculum has rows but no week label. Start with a row like: Week 1: Basics,First topic")
+        d100 = parse_discount(form["discount"])
+    except ValueError as exc:
+        errors.append(str(exc))
+    if d100 and price_with_discount(form["price"], d100) is None:
+        errors.append("A discount needs a price that contains a number (for example Tk 500).")
+
+    grid = []
+    try:
+        grid = normalize_grid(csv.reader(io.StringIO(form["csv"], newline="")))
+        problem = _grid_error(grid)
+        if problem:
+            errors.append(problem)
     except csv.Error as exc:
         errors.append(f"Curriculum CSV could not be parsed: {exc}")
 
@@ -1153,11 +1896,15 @@ def _read_submission(creating, existing_meta, added_default):
     meta["instructors"] = list(dict.fromkeys(form["instructors"]))
     meta["order"] = order if order is not None else 100
     meta["added"] = form["added"] or added_default
+    if d100:
+        meta["discount"] = d100 // 100 if d100 % 100 == 0 else float(Decimal(d100) / 100)
+    else:
+        meta.pop("discount", None)
     meta["published"] = form["published"]
     return form, {
         "slug": form["slug"],
         "meta": meta,
-        "groups": groups,
+        "grid": grid,
         "upload": upload,
         "remove_thumb": f.get("remove_thumbnail") == "on",
     }, []
@@ -1166,15 +1913,15 @@ def _read_submission(creating, existing_meta, added_default):
 def _editor(slug):
     creating = slug is None
     path = None if creating else _course_path(slug)
-    instructors = load_instructors()
+    instructors = load_instructors(include_hidden=True)
     load_error = None
     existing_meta = {}
-    csv_text = "week,topic\n"
+    csv_text = ""
     thumb = None
     if not creating:
         existing_meta, load_error = _read_json_checked(os.path.join(path, "meta.json"))
         existing_meta = existing_meta or {}
-        csv_text = _read_text(os.path.join(path, "curriculum.csv")) or "week,topic\n"
+        csv_text = _read_text(os.path.join(path, "curriculum.csv")) or ""
         thumb = _find_image(path, "thumbnail")
 
     # Date shown in the "added" field. New course: today. Existing: its own date, else the file's modified date.
@@ -1192,7 +1939,7 @@ def _editor(slug):
             if creating:
                 os.makedirs(target_path)
             _atomic_write(os.path.join(target_path, "meta.json"), _dump_meta(result["meta"]))
-            _atomic_write(os.path.join(target_path, "curriculum.csv"), "\ufeff" + _curriculum_to_csv(result["groups"]), encoding="utf-8")
+            _atomic_write(os.path.join(target_path, "curriculum.csv"), ("\ufeff" + _grid_to_csv(result["grid"])) if result["grid"] else "", encoding="utf-8")
             if result["upload"]:
                 ext, data = result["upload"]
                 name = "thumbnail" + ext
@@ -1259,12 +2006,16 @@ def course_delete(slug):
 def trash_restore(name):
     src = _trash_path(name)
     slug = TRASH_RE.match(name).group("slug")
-    target = slug if not os.path.exists(os.path.join(_courses_dir(), slug)) else _unique_slug(slug + "-restored")
-    os.makedirs(_courses_dir(), exist_ok=True)
-    shutil.move(src, os.path.join(_courses_dir(), target))
+    is_person = slug.startswith(TRASH_INSTRUCTOR_PREFIX)
+    root = _instructors_dir() if is_person else _courses_dir()
+    if is_person:
+        slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
+    target = slug if not os.path.exists(os.path.join(root, slug)) else _unique_slug(slug + "-restored", root)
+    os.makedirs(root, exist_ok=True)
+    shutil.move(src, os.path.join(root, target))
     log.info("admin: restored '%s' as '%s'", name, target)
     flash(f"Restored as '{target}'." + ("" if target == slug else " The original name was taken."), "success")
-    return redirect(url_for("admin.course_edit", slug=target))
+    return redirect(url_for("admin.instructor_edit" if is_person else "admin.course_edit", slug=target))
 
 
 @admin_bp.post("/trash/<name>/purge")
@@ -1319,6 +2070,422 @@ def course_toggle(slug):
         log.info("admin: '%s' is now %s", slug, "published" if now_published else "hidden")
         flash(f"'{slug}' is now {'published' if now_published else 'hidden'}.", "success")
     return redirect(url_for("admin.dashboard"))
+
+
+# ---------------------------------------------------------------------------
+# Admin: instructors
+#
+# There are no instructor accounts. The manager (or an instructor, with the manager's
+# permission) signs in to this one console and edits profiles here, so every change goes
+# through the same login, CSRF protection and activity log as the courses.
+# ---------------------------------------------------------------------------
+
+CV_LIMIT = 5 * 1024 * 1024
+ENTRY_LABELS = {
+    "education": "Education", "experience": "Experience",
+    "certifications": "Certification", "achievements": "Project / achievement",
+}
+FIELD_LIMITS = {"details": 1000, "link": 300, "year": 40, "period": 60, "url": 300, "platform": 40}
+
+
+def _dump_profile(data):
+    ordered = {k: data[k] for k in PROFILE_KEYS if k in data}
+    ordered.update({k: v for k, v in data.items() if k not in ordered})      # keep hand-added keys
+    return json.dumps(ordered, indent=4, ensure_ascii=False) + "\n"
+
+
+def _courses_using(name):
+    """Titles of the courses (hidden ones too) that list this instructor by name."""
+    titles = []
+    for folder in _subfolders(_courses_dir()):
+        meta, err = _read_json_checked(os.path.join(_courses_dir(), folder, "meta.json"))
+        if meta and any(_norm(n) == _norm(name) for n in _text_list(meta.get("instructors"))):
+            titles.append(_text(meta.get("title")) or folder)
+    return titles
+
+
+def scan_instructors():
+    """Every instructor folder (hidden and broken ones too) with diagnostics for the list page."""
+    root = _instructors_dir()
+    entries = []
+    for folder in _subfolders(root):
+        path = os.path.join(root, folder)
+        data, err = _read_json_checked(os.path.join(path, "profile.json"))
+        issues = []
+        if err == "file not found":
+            issues.append({"level": "warn", "text": "no profile.json; the folder name is used as the name"})
+            data, err = {}, None
+        elif err:
+            issues.append({"level": "error", "text": f"profile.json: {err}; this person is ignored by the public site"})
+            data = {}
+        view = _instructor_view(folder, data or {}, path)
+        status = "broken" if err else ("published" if view["published"] else "hidden")
+        if not err:
+            unknown = [k for k in data if k not in PROFILE_KEYS]
+            if unknown:
+                issues.append({"level": "info", "text": "unknown key(s) ignored by the site: " + ", ".join(f"'{k}'" for k in unknown)})
+            if _text(data.get("email")) and not view["email"]:
+                issues.append({"level": "warn", "text": "email does not look valid, so it is not shown"})
+            if _text(data.get("phone")) and not view["phone"]:
+                issues.append({"level": "warn", "text": "phone number does not look valid, so it is not shown"})
+            if _text(data.get("website")) and not view["website"]:
+                issues.append({"level": "warn", "text": "website is not a web address, so it is not shown"})
+            if not _text(data.get("name")):
+                issues.append({"level": "warn", "text": "no name; the folder name is used"})
+        checks = [(label, bool(test(view))) for _, label, test in PROFILE_CHECKS]
+        used_in = _courses_using(view["name"]) if not err else []
+        entries.append({
+            "slug": folder, "status": status, "name": view["name"], "role": view["role"], "photo": view["photo"],
+            "order": view["order"], "cv": bool(view["cv"]), "checks": checks,
+            "filled": sum(1 for _, ok in checks if ok), "total": len(checks),
+            "used_in": used_in, "issues": issues,
+            "n_error": sum(1 for i in issues if i["level"] == "error"),
+            "n_warn": sum(1 for i in issues if i["level"] == "warn"),
+        })
+    return entries
+
+
+def _rename_in_courses(old, new):
+    """After an instructor is renamed, point every course at the new name. Returns how many courses changed."""
+    changed = 0
+    for folder in _subfolders(_courses_dir()):
+        meta_path = os.path.join(_courses_dir(), folder, "meta.json")
+        meta, err = _read_json_checked(meta_path)
+        if meta is None or not isinstance(meta.get("instructors"), list):
+            continue
+        names = [new if isinstance(n, str) and _norm(n) == _norm(old) else n for n in meta["instructors"]]
+        if names == meta["instructors"]:
+            continue
+        if not _valid_date(_text(meta.get("added"))):
+            meta["added"] = _added_info(meta, meta_path)[1]          # rewriting must not make an old course look new
+        meta["instructors"] = list(dict.fromkeys(names))
+        _atomic_write(meta_path, _dump_meta(meta))
+        changed += 1
+    return changed
+
+
+def _form_rows(prefix, fields, limit=30):
+    """Rows of a repeatable section, in the order they appear in the form (blank rows dropped)."""
+    pattern = re.compile(r"^%s-(\d+)-(%s)$" % (re.escape(prefix), "|".join(fields)))
+    rows, order = {}, []
+    for key in request.form.keys():
+        m = pattern.match(key)
+        if not m:
+            continue
+        if m.group(1) not in rows:
+            rows[m.group(1)] = {}
+            order.append(m.group(1))
+        rows[m.group(1)][m.group(2)] = request.form.get(key, "").strip()
+    result = [{f: rows[i].get(f, "") for f in fields} for i in order]
+    return [r for r in result if any(r.values())][:limit]
+
+
+def _tags(text):
+    seen, out = set(), []
+    for part in re.split(r"[\n,]", text or ""):
+        part = part.strip()
+        if part and part.casefold() not in seen:
+            seen.add(part.casefold())
+            out.append(part)
+    return out
+
+
+def _raw_rows(value, fields):
+    """Rows for the form from stored JSON, without dropping anything the person typed."""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, str):
+            item = {fields[0]: item}
+        if isinstance(item, dict):
+            out.append({f: _text(item.get(f)) for f in fields})
+    return out
+
+
+def _instructor_form_from_data(data, slug, order=""):
+    form = {"slug": slug or ""}
+    for key in ("name", "role", "bio", "biography", "teaching_approach", "location", "email", "phone", "website"):
+        form[key] = _text(data.get(key))
+    form["order"] = str(data["order"]) if isinstance(data.get("order"), int) else (str(order) if order != "" else _text(data.get("order")))
+    form["published"] = (not _is_false(data.get("published", True))) if data else False
+    form["expertise"] = "\n".join(_text_list(data.get("expertise")))
+    form["languages"] = "\n".join(_text_list(data.get("languages")))
+    socials = data.get("socials")
+    if isinstance(socials, dict):
+        socials = [{"platform": k, "url": v} for k, v in socials.items()]
+    form["socials"] = _raw_rows(socials, ("platform", "url"))
+    for key, fields in ENTRY_FIELDS.items():
+        form[key] = _raw_rows(data.get(key), fields)
+    sections = []
+    for item in data.get("sections") if isinstance(data.get("sections"), list) else []:
+        if isinstance(item, dict):
+            items = item.get("items")
+            sections.append({"title": _text(item.get("title")),
+                             "items": items if isinstance(items, str) else "\n".join(_text_list(items))})
+    form["sections"] = sections
+    return form
+
+
+def _read_instructor_submission(creating, existing, own_slug):
+    """Validate the posted form. Returns (form_for_rerender, result_or_None, errors)."""
+    f = request.form
+    errors = []
+    form = {"slug": f.get("slug", "").strip().lower() if creating else own_slug or ""}
+    for key in ("name", "role", "bio", "biography", "teaching_approach", "location", "email", "phone", "website", "order"):
+        form[key] = f.get(key, "").strip()
+    form["published"] = f.get("published") == "on"
+    form["expertise"] = f.get("expertise", "")
+    form["languages"] = f.get("languages", "")
+
+    def cap(label, text, limit):
+        if len(text) > limit:
+            errors.append(f"{label} is too long (max {limit} characters).")
+
+    if creating:
+        err = _slug_error(form["slug"])
+        if err:
+            errors.append(err)
+        elif os.path.exists(os.path.join(_instructors_dir(), form["slug"])):
+            errors.append(f"An instructor folder named '{form['slug']}' already exists.")
+    if not form["name"]:
+        errors.append("Name is required.")
+    cap("Name", form["name"], 80)
+    cap("Role", form["role"], 120)
+    cap("Short description", form["bio"], 500)
+    cap("Biography", form["biography"], 8000)
+    cap("Teaching approach", form["teaching_approach"], 3000)
+    cap("Location", form["location"], 100)
+    if form["name"]:
+        for other in load_instructors(include_hidden=True):
+            if other["slug"] != (own_slug if not creating else None) and _norm(other["name"]) == _norm(form["name"]):
+                errors.append(f"Another instructor is already called '{other['name']}'. Courses refer to instructors by name, so names must be different.")
+                break
+    order = None
+    if form["order"]:
+        try:
+            order = int(form["order"])
+        except ValueError:
+            errors.append("Order must be a whole number.")
+    if form["email"] and not EMAIL_RE.match(form["email"]):
+        errors.append("Email does not look like an email address.")
+    if form["phone"] and not PHONE_RE.match(form["phone"]):
+        errors.append("Phone may only contain digits, spaces, + ( ) - . (5 to 25 characters).")
+    if form["website"]:
+        url, problem = clean_url(form["website"])
+        if problem:
+            errors.append(f"Website {problem}.")
+        else:
+            form["website"] = url
+    cap("Website", form["website"], 300)
+
+    tags = {"expertise": _tags(form["expertise"]), "languages": _tags(form["languages"])}
+    for key, label in (("expertise", "Expertise"), ("languages", "Languages")):
+        if len(tags[key]) > 40 or any(len(t) > 60 for t in tags[key]):
+            errors.append(f"{label}: at most 40 items, each up to 60 characters.")
+
+    form["socials"] = _form_rows("socials", ("platform", "url"))
+    for n, row in enumerate(form["socials"], 1):
+        if not row["url"]:
+            errors.append(f"Link #{n}: add the web address for '{row['platform']}' or remove the row.")
+            continue
+        url, problem = clean_url(row["url"])
+        if problem:
+            errors.append(f"Link #{n} {problem}.")
+        else:
+            row["url"] = url
+        row["platform"] = row["platform"] or "Link"
+        cap(f"Link #{n} name", row["platform"], 40)
+    for key, fields in ENTRY_FIELDS.items():
+        form[key] = _form_rows(key, fields)
+        for n, row in enumerate(form[key], 1):
+            label = f"{ENTRY_LABELS[key]} #{n}"
+            if not row[fields[0]]:
+                errors.append(f"{label}: fill in the {fields[0].replace('_', ' ')} or remove the row.")
+            for fld in fields:
+                cap(f"{label} {fld}", row[fld], FIELD_LIMITS.get(fld, 150))
+            if row.get("link"):
+                url, problem = clean_url(row["link"])
+                if problem:
+                    errors.append(f"{label} link {problem}.")
+                else:
+                    row["link"] = url
+    form["sections"] = _form_rows("sections", ("title", "items"), limit=12)
+    for n, row in enumerate(form["sections"], 1):
+        if not row["title"] or not row["items"]:
+            errors.append(f"Extra section #{n}: it needs both a title and at least one item (or remove it).")
+        cap(f"Extra section #{n} title", row["title"], 80)
+        cap(f"Extra section #{n} items", row["items"], 3000)
+
+    photo = cv = None
+    file = request.files.get("photo")
+    if file and file.filename:
+        data = file.read(UPLOAD_LIMIT + 1)
+        if len(data) > UPLOAD_LIMIT:
+            errors.append("Photo is larger than 5 MB.")
+        elif _sniff_image(data) is None:
+            errors.append("Photo must be a real JPG, PNG, WEBP or GIF image (SVG is not accepted).")
+        else:
+            photo = (_sniff_image(data), data)
+    file = request.files.get("cv")
+    if file and file.filename:
+        data = file.read(CV_LIMIT + 1)
+        if len(data) > CV_LIMIT:
+            errors.append("CV is larger than 5 MB.")
+        elif b"%PDF-" not in data[:1024]:
+            errors.append("CV must be a real PDF file.")
+        else:
+            cv = data
+
+    if errors:
+        return form, None, errors
+
+    profile = dict(existing or {})
+    profile["name"] = form["name"]
+    for key in ("role", "bio", "biography", "teaching_approach", "location", "email", "phone", "website"):
+        if form[key]:
+            profile[key] = form[key]
+        else:
+            profile.pop(key, None)
+    for key, value in (("expertise", tags["expertise"]), ("languages", tags["languages"]),
+                       ("socials", form["socials"]), ("sections", [
+                           {"title": r["title"], "items": _lines(r["items"])} for r in form["sections"]])):
+        if value:
+            profile[key] = value
+        else:
+            profile.pop(key, None)
+    for key in ENTRY_FIELDS:
+        if form[key]:
+            profile[key] = form[key]
+        else:
+            profile.pop(key, None)
+    profile["order"] = order if order is not None else 100
+    profile["published"] = form["published"]
+    return form, {
+        "profile": profile, "slug": form["slug"], "photo": photo, "cv": cv,
+        "remove_photo": f.get("remove_photo") == "on", "remove_cv": f.get("remove_cv") == "on",
+    }, []
+
+
+def _instructor_editor(slug):
+    creating = slug is None
+    path = None if creating else _instructor_path(slug)
+    existing, load_error = {}, None
+    if not creating:
+        existing, load_error = _read_json_checked(os.path.join(path, "profile.json"))
+        if load_error == "file not found":
+            existing, load_error = {}, None
+        existing = existing or {}
+    old_name = _text(existing.get("name")) or (slug or "")
+    errors, status = [], 200
+    if request.method == "POST":
+        form, result, errors = _read_instructor_submission(creating, existing, slug)
+        if result is not None:
+            target = result["slug"] if creating else slug
+            target_path = os.path.join(_instructors_dir(), target)
+            if creating:
+                os.makedirs(target_path)
+            _atomic_write(os.path.join(target_path, "profile.json"), _dump_profile(result["profile"]))
+            if result["photo"]:
+                ext, data = result["photo"]
+                _atomic_write(os.path.join(target_path, "photo" + ext), data)
+                _remove_thumbnails(target_path, keep="photo" + ext, stem="photo")
+            elif result["remove_photo"]:
+                _remove_thumbnails(target_path, stem="photo")
+            cv_path = os.path.join(target_path, CV_NAME)
+            if result["cv"]:
+                _atomic_write(cv_path, result["cv"])
+            elif result["remove_cv"] and os.path.isfile(cv_path):
+                os.remove(cv_path)
+            renamed = 0
+            if not creating and _norm(old_name) != _norm(result["profile"]["name"]):
+                renamed = _rename_in_courses(old_name, result["profile"]["name"])
+            log.info("admin: %s instructor '%s'", "created" if creating else "saved", target)
+            if creating:
+                flash(f"Created '{target}' as a draft. Tick 'published' when the profile is ready.", "success")
+            else:
+                msg = f"Saved '{target}'. The public site already shows the new version."
+                if renamed:
+                    msg += f" Renamed in {renamed} course(s) too."
+                flash(msg, "success")
+            return redirect(url_for("admin.instructor_edit", slug=target))
+        status = 400
+    else:
+        if creating:
+            taken = [p["order"] for p in load_instructors(include_hidden=True)]
+            form = _instructor_form_from_data({}, "", (max(taken) + 1) if taken else 1)
+            form["published"] = False
+        else:
+            form = _instructor_form_from_data(existing, slug)
+    view = _instructor_view(slug, existing, path) if not creating else None
+    photo = _find_image(path, "photo") if path else None
+    return render_template(
+        "admin_instructor_edit.html",
+        creating=creating, slug=slug, form=form, errors=errors, load_error=load_error,
+        photo=(f"instructors/{slug}/{photo}" if photo else None),
+        cv=(f"instructors/{slug}/{CV_NAME}" if path and os.path.isfile(os.path.join(path, CV_NAME)) else None),
+        cv_size=(os.path.getsize(os.path.join(path, CV_NAME)) if path and os.path.isfile(os.path.join(path, CV_NAME)) else 0),
+        used_in=(_courses_using(old_name) if not creating else []),
+        public_visible=(not creating and not load_error and form["published"]),
+        social_suggestions=SOCIAL_SUGGESTIONS, entry_fields=ENTRY_FIELDS,
+        checks=[(key, label) for key, label, _ in PROFILE_CHECKS],
+    ), status
+
+
+@admin_bp.route("/instructors")
+def instructors_list():
+    entries = scan_instructors()
+    stats = {
+        "total": len(entries),
+        "published": sum(1 for e in entries if e["status"] == "published"),
+        "hidden": sum(1 for e in entries if e["status"] == "hidden"),
+        "broken": sum(1 for e in entries if e["status"] == "broken"),
+    }
+    return render_template("admin_instructors.html", people=entries, stats=stats)
+
+
+@admin_bp.route("/instructor/new", methods=["GET", "POST"])
+def instructor_new():
+    return _instructor_editor(None)
+
+
+@admin_bp.route("/instructor/<slug>", methods=["GET", "POST"])
+def instructor_edit(slug):
+    return _instructor_editor(slug)
+
+
+@admin_bp.post("/instructor/<slug>/delete")
+def instructor_delete(slug):
+    path = _instructor_path(slug)
+    data, _ = _read_json_checked(os.path.join(path, "profile.json"))
+    used = _courses_using(_text((data or {}).get("name")) or slug)
+    os.makedirs(_trash_dir(), exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = f"{TRASH_INSTRUCTOR_PREFIX}{slug}__{stamp}"
+    dest, n = os.path.join(_trash_dir(), base), 1
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(_trash_dir(), f"{base}-{n}")
+    shutil.move(path, dest)
+    log.info("admin: moved instructor '%s' to trash", slug)
+    msg = f"Moved '{slug}' to trash. You can restore it from the Trash page."
+    if used:
+        msg += f" {len(used)} course(s) still list this name and show it as plain text until it is restored."
+    flash(msg, "success")
+    return redirect(url_for("admin.instructors_list"))
+
+
+@admin_bp.post("/instructor/<slug>/toggle")
+def instructor_toggle(slug):
+    path = _instructor_path(slug)
+    data, err = _read_json_checked(os.path.join(path, "profile.json"))
+    if data is None:
+        flash(f"Cannot change '{slug}': profile.json {err}. Open it in the editor to repair it.", "error")
+    else:
+        now_published = _is_false(data.get("published", True))
+        data["published"] = now_published
+        _atomic_write(os.path.join(path, "profile.json"), _dump_profile(data))
+        log.info("admin: instructor '%s' is now %s", slug, "published" if now_published else "hidden")
+        flash(f"'{slug}' is now {'published' if now_published else 'hidden'}.", "success")
+    return redirect(url_for("admin.instructors_list"))
 
 
 app.register_blueprint(admin_bp)

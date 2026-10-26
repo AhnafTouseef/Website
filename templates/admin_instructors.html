@@ -1,0 +1,99 @@
+{% extends "admin_base.html" %}
+{% block title %}instructors{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>instructors</h1>
+    <span class="sub">{{ stats.total }} folder(s) in static/instructors/ · each one gets a public profile page</span>
+    <div class="right">
+        <a class="a-btn primary" href="{{ url_for('admin.instructor_new') }}">+ add instructor</a>
+    </div>
+</div>
+
+<div class="a-note">There are no separate instructor logins. Profiles are created and edited here, in the one console, by the manager or by an instructor the manager has given access to.</div>
+
+<div class="tiles">
+    <div class="tile ok"><div class="k">published</div><div class="v">{{ stats.published }}</div></div>
+    <div class="tile {{ 'warn' if stats.hidden }}"><div class="k">hidden</div><div class="v">{{ stats.hidden }}</div></div>
+    <div class="tile {{ 'bad' if stats.broken else 'ok' }}"><div class="k">broken</div><div class="v">{{ stats.broken }}</div></div>
+</div>
+
+<section class="panel">
+    <header><b>static/instructors/</b><span>click “inspect” to see which profile sections are filled in and any problems found</span></header>
+    {% if people %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th></th><th>instructor</th><th>status</th><th class="num">order</th><th>profile</th><th>CV</th><th>used in</th><th>health</th><th>actions</th></tr></thead>
+        <tbody>
+        {% for p in people %}
+            <tr class="row">
+                <td>{% if p.photo %}<img class="thumb square" src="{{ url_for('static', filename=p.photo) }}" alt="">{% else %}<div class="thumb square none">—</div>{% endif %}</td>
+                <td>
+                    <div class="cell-title">{{ p.name }}</div>
+                    <div class="cell-slug">{{ p.role or 'no role set' }} · /instructor/{{ p.slug }}</div>
+                    <details class="dd" style="margin-top:.3rem"><summary>inspect</summary></details>
+                </td>
+                <td><span class="chip {{ p.status }}">{{ p.status }}</span></td>
+                <td class="num">{{ p.order }}</td>
+                <td class="nowrap"><span class="mini-meter" title="{{ p.filled }} of {{ p.total }} profile sections filled in"><i style="width: {{ (p.filled * 100 / p.total)|int }}%"></i></span> <span class="dim mono-sm">{{ p.filled }}/{{ p.total }}</span></td>
+                <td>{{ '✓' if p.cv else '—' }}</td>
+                <td class="mono-sm">{% if p.used_in %}{{ p.used_in|length }} course(s){% else %}<span class="dim">—</span>{% endif %}</td>
+                <td class="nowrap">
+                    {% if p.n_error %}<span class="chip err">{{ p.n_error }} err</span>{% endif %}
+                    {% if p.n_warn %}<span class="chip wrn">{{ p.n_warn }} warn</span>{% endif %}
+                    {% if not p.n_error and not p.n_warn %}<span class="chip ok">ok</span>{% endif %}
+                </td>
+                <td class="nowrap">
+                    <a class="a-btn small" href="{{ url_for('admin.instructor_edit', slug=p.slug) }}">edit</a>
+                    {% if p.status == 'published' %}<a class="a-btn small" href="{{ url_for('instructor_profile', slug=p.slug) }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+                    {% if p.status != 'broken' %}
+                    <form class="inline" method="post" action="{{ url_for('admin.instructor_toggle', slug=p.slug) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small warn" type="submit">{{ 'hide' if p.status == 'published' else 'publish' }}</button>
+                    </form>
+                    {% endif %}
+                    <form class="inline" method="post" action="{{ url_for('admin.instructor_delete', slug=p.slug) }}" data-confirm="Move '{{ p.slug }}' to trash? You can restore it later.{% if p.used_in %} It is listed in {{ p.used_in|length }} course(s); they will show the name as plain text.{% endif %}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small danger" type="submit">delete</button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="detail" hidden>
+                <td colspan="9">
+                    <div class="dd-grid">
+                        <div>
+                            <h4>profile sections</h4>
+                            <ul class="checks static">{% for label, ok in p.checks %}<li class="{{ 'on' if ok }}"><span class="mark"></span>{{ label }}</li>{% endfor %}</ul>
+                        </div>
+                        <div>
+                            <h4>diagnostics</h4>
+                            {% if p.issues %}<ul class="issues">{% for i in p.issues %}<li class="{{ i.level }}">{{ i.text }}</li>{% endfor %}</ul>
+                            {% else %}<div class="dim">no problems found</div>{% endif %}
+                            {% if p.used_in %}<h4 style="margin-top:.8rem">used in</h4><ul class="plainlist">{% for t in p.used_in %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty">static/instructors/ has no folders yet. <a href="{{ url_for('admin.instructor_new') }}">Add the first instructor →</a></div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    document.querySelectorAll('details.dd').forEach(function (d) {
+        var detailRow = d.closest('tr').nextElementSibling;
+        d.addEventListener('toggle', function () { detailRow.hidden = !d.open; });
+    });
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+})();
+</script>
+{% endblock %}

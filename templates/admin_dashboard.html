@@ -13,8 +13,8 @@
     <div class="tile ok"><div class="k">published</div><div class="v">{{ stats.published }}</div></div>
     <div class="tile {{ 'warn' if stats.hidden }}"><div class="k">hidden</div><div class="v">{{ stats.hidden }}</div></div>
     <div class="tile {{ 'bad' if stats.broken else 'ok' }}"><div class="k">broken</div><div class="v">{{ stats.broken }}</div></div>
-    <div class="tile"><div class="k">weeks / topics</div><div class="v">{{ stats.weeks }} <small>/ {{ stats.topics }}</small></div></div>
-    <div class="tile"><div class="k">instructors</div><div class="v">{{ stats.instructors }}</div></div>
+    <div class="tile"><div class="k">curriculum rows</div><div class="v">{{ stats.rows }}</div></div>
+    <a class="tile link" href="{{ url_for('admin.instructors_list') }}"><div class="k">instructors</div><div class="v">{{ stats.instructors }}</div></a>
     <div class="tile {{ 'warn' if stats.no_thumb }}"><div class="k">no thumbnail</div><div class="v">{{ stats.no_thumb }}</div></div>
     <div class="tile {{ 'bad' if stats.errors else ('warn' if stats.warnings else 'ok') }}"><div class="k">errors / warnings</div><div class="v">{{ stats.errors }} <small>/ {{ stats.warnings }}</small></div></div>
     <div class="tile"><div class="k">disk used</div><div class="v">{{ stats.bytes|filesize }}</div></div>
@@ -28,7 +28,7 @@
         <thead>
             <tr>
                 <th></th><th>course</th><th>status</th><th class="num">order</th><th>added</th><th>price</th>
-                <th class="num">wk/top</th><th>instructors</th><th>health</th><th>modified</th><th>actions</th>
+                <th class="num">rows×cols</th><th>instructors</th><th>health</th><th>modified</th><th>actions</th>
             </tr>
         </thead>
         <tbody>
@@ -46,8 +46,8 @@
                 <td><span class="chip {{ c.status }}">{{ c.status }}</span></td>
                 <td class="num">{{ c.order if c.order is not none else '—' }}</td>
                 <td class="nowrap mono-sm">{{ c.added or '—' }}</td>
-                <td class="nowrap">{{ c.price or '—' }}</td>
-                <td class="num nowrap">{{ c.weeks }}/{{ c.topics }}</td>
+                <td class="nowrap">{% if c.discount %}<span class="sale-old">{{ c.price }}</span><span class="sale-new">{{ c.price_final }}</span><span class="sale-tag">{{ c.discount }}% OFF</span>{% else %}{{ c.price or '—' }}{% endif %}</td>
+                <td class="num nowrap">{{ c.rows }}×{{ c.cols }}</td>
                 <td class="mono-sm">{{ c.instructor_names|join(', ') or '—' }}</td>
                 <td class="nowrap">
                     {% if c.n_error %}<span class="chip err">{{ c.n_error }} err</span>{% endif %}
@@ -103,26 +103,12 @@
 </section>
 
 <section class="panel">
-    <header><b>static/instructors/</b><span>read-only here; edit profile.json and photo files in the folder</span></header>
-    {% if instructors %}
-    <div class="scroll-x">
-    <table class="t">
-        <thead><tr><th></th><th>name</th><th>role</th><th>folder</th><th class="num">order</th><th class="num">used in</th></tr></thead>
-        <tbody>
-        {% for p in instructors %}
-            <tr class="row">
-                <td>{% if p.photo %}<img class="thumb" style="width:46px" src="{{ url_for('static', filename=p.photo) }}" alt="">{% else %}<div class="thumb none" style="width:46px">—</div>{% endif %}</td>
-                <td class="cell-title">{{ p.name }}</td>
-                <td>{{ p.role or '—' }}</td>
-                <td class="dim mono-sm">instructors/{{ p.slug }}/</td>
-                <td class="num">{{ p.order }}</td>
-                <td class="num">{{ p.used_in }} course(s)</td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+    <header><b>static/instructors/</b><span>{{ instructors|length }} profile(s)</span></header>
+    <div class="body">
+        <span class="dim">Instructor profiles have their own section now.</span>
+        <a class="a-btn small" href="{{ url_for('admin.instructors_list') }}">manage instructors →</a>
+        <a class="a-btn small primary" href="{{ url_for('admin.instructor_new') }}">+ add instructor</a>
     </div>
-    {% else %}<div class="empty">no instructor folders found</div>{% endif %}
 </section>
 {% endblock %}
 

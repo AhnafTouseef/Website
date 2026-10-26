@@ -1,0 +1,479 @@
+{% extends "admin_base.html" %}
+{% from "_admin_macros.html" import repeater %}
+{% block title %}{{ 'new instructor' if creating else slug }}{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>{% if creating %}new instructor{% else %}edit {{ slug }}{% endif %}</h1>
+    <span class="sub">{% if creating %}creates static/instructors/&lt;folder&gt;/ with profile.json{% else %}static/instructors/{{ slug }}/{% endif %}</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('admin.instructors_list') }}">← back</a>
+        {% if public_visible %}<a class="a-btn" href="{{ url_for('instructor_profile', slug=slug) }}" target="_blank" rel="noopener">view public profile ↗</a>{% endif %}
+    </div>
+</div>
+
+<div class="a-note">Only <b>name</b> is required. Every other section is optional: leave out whatever does not apply (a fresh graduate has no job experience, and that is fine). Everything you fill in is shown on the public profile page.</div>
+
+{% if load_error %}
+<div class="errors">profile.json could not be read ({{ load_error }}). The form starts from empty values; saving will replace the broken file with a clean one.</div>
+{% endif %}
+{% if errors %}
+<div class="errors"><b>Not saved. Fix these first:</b><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+{% set edu_fields = [
+    {'key': 'degree', 'label': 'Degree / qualification', 'ph': 'B.Sc. in Petroleum Engineering', 'required': true, 'cls': 'span2'},
+    {'key': 'institution', 'label': 'Institution', 'ph': 'Jashore University of Science and Technology'},
+    {'key': 'period', 'label': 'Years', 'ph': '2019 – 2023, or Expected 2027'},
+    {'key': 'details', 'label': 'Details (optional)', 'ph': 'Thesis, honours, GPA …', 'area': true, 'cls': 'span2'}] %}
+{% set exp_fields = [
+    {'key': 'role', 'label': 'Role / position', 'ph': 'Data Analyst', 'required': true, 'cls': 'span2'},
+    {'key': 'organization', 'label': 'Organisation', 'ph': 'Company or client'},
+    {'key': 'period', 'label': 'Period', 'ph': 'Jan 2024 – Present'},
+    {'key': 'details', 'label': 'What you did (optional)', 'ph': 'One or two lines on your responsibilities and results', 'area': true, 'cls': 'span2'}] %}
+{% set cert_fields = [
+    {'key': 'name', 'label': 'Certificate / course', 'ph': 'Google Data Analytics Certificate', 'required': true, 'cls': 'span2'},
+    {'key': 'issuer', 'label': 'Issued by', 'ph': 'Coursera'},
+    {'key': 'year', 'label': 'Year', 'ph': '2025'},
+    {'key': 'link', 'label': 'Verification link (optional)', 'ph': 'https://…', 'cls': 'span2'}] %}
+{% set ach_fields = [
+    {'key': 'title', 'label': 'Title', 'ph': 'Built a reporting pipeline for …', 'required': true, 'cls': 'span2'},
+    {'key': 'year', 'label': 'Year', 'ph': '2025'},
+    {'key': 'link', 'label': 'Link (optional)', 'ph': 'https://github.com/…'},
+    {'key': 'details', 'label': 'Details (optional)', 'ph': 'What it was and why it matters', 'area': true, 'cls': 'span2'}] %}
+{% set social_fields = [
+    {'key': 'platform', 'label': 'Platform', 'ph': 'LinkedIn', 'list': 'social-list'},
+    {'key': 'url', 'label': 'Web address', 'ph': 'https://linkedin.com/in/…', 'cls': 'span2'}] %}
+{% set section_fields = [
+    {'key': 'title', 'label': 'Section title', 'ph': 'Publications, Awards, Volunteering …', 'required': true},
+    {'key': 'items', 'label': 'Items, one per line', 'ph': 'First item\nSecond item', 'area': true, 'rows': 3, 'cls': 'span2'}] %}
+
+<datalist id="social-list">{% for s in social_suggestions %}<option value="{{ s }}">{% endfor %}</datalist>
+
+<form method="post" enctype="multipart/form-data" id="editor" autocomplete="off">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="split">
+    <div>
+        <section class="panel">
+            <header><b>identity</b><span>required</span></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-name">full name <code>name</code> <span class="req">*</span></label>
+                    <input id="f-name" type="text" name="name" value="{{ form.name }}" maxlength="80" required>
+                    <div class="help">Courses refer to instructors by this name. Renaming later updates the courses automatically.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-slug">folder name <code>(URL slug)</code></label>
+                    {% if creating %}
+                    <input id="f-slug" type="text" name="slug" value="{{ form.slug }}" placeholder="jane-doe" maxlength="60" required>
+                    <div class="help">lowercase letters, digits, single hyphens. Becomes /instructor/&lt;this&gt; and cannot be changed later.</div>
+                    {% else %}
+                    <input id="f-slug" type="text" value="{{ slug }}" readonly>
+                    <div class="help">fixed after creation (changing it would break existing links).</div>
+                    {% endif %}
+                </div>
+                <div class="field">
+                    <label class="l" for="f-role">role / title <code>role</code></label>
+                    <input id="f-role" type="text" name="role" value="{{ form.role }}" maxlength="120" placeholder="Lead Instructor">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-location">location <code>location</code> <span class="opt">optional</span></label>
+                    <input id="f-location" type="text" name="location" value="{{ form.location }}" maxlength="100" placeholder="Dhaka, Bangladesh">
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-bio">short description <code>bio</code></label>
+                    <textarea id="f-bio" name="bio" rows="3" maxlength="500">{{ form.bio }}</textarea>
+                    <div class="help">1–2 sentences. Shown on the instructor cards and at the top of the profile page.</div>
+                </div>
+                <div class="field">
+                    <label class="l" for="f-order">sort order <code>order</code></label>
+                    <input id="f-order" type="number" name="order" value="{{ form.order }}" step="1">
+                    <div class="help">lower = earlier on course pages</div>
+                </div>
+                <div class="field">
+                    <label class="l">visibility</label>
+                    <label class="chk"><input type="checkbox" name="published" {% if form.published %}checked{% endif %}> <b>published</b></label>
+                    <div class="help">unticked = hidden everywhere on the public site (a draft)</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>photo</b><span class="opt">optional</span><span>square crop · JPG / PNG / WEBP / GIF · max 5 MB</span></header>
+            <div class="body">
+                <input type="hidden" name="remove_photo" id="f-remove-photo" value="">
+                <input type="file" name="photo" id="f-photo" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                <div class="uploader square" id="ph-uploader" data-state="{{ 'current' if photo else 'empty' }}">
+                    <div class="up-frame" id="ph-frame" tabindex="0" role="button" aria-label="Photo: click to choose an image, or drop one here">
+                        <img id="ph-img" alt="Photo preview" {% if photo %}src="{{ url_for('static', filename=photo) }}?t={{ range(1, 10**9)|random }}" data-current-src="{{ url_for('static', filename=photo) }}?t={{ range(1, 10**9)|random }}"{% else %}hidden{% endif %}>
+                        <div class="up-empty">
+                            <div class="up-icon" aria-hidden="true">🙂</div>
+                            <div><b>Drop a photo here</b></div>
+                            <div class="dim">or click to choose</div>
+                        </div>
+                        <div class="up-actions">
+                            <button type="button" class="a-btn small" id="ph-replace">replace</button>
+                            <button type="button" class="a-btn small danger" id="ph-remove" title="Remove this photo">✕ remove</button>
+                        </div>
+                    </div>
+                    <div class="up-status" id="ph-status" role="status" aria-live="polite"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>about</b><span class="opt">optional</span><span>the biography is what makes a profile feel real</span></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-biography">biography <code>biography</code></label>
+                    <textarea id="f-biography" name="biography" rows="8" maxlength="8000">{{ form.biography }}</textarea>
+                    <div class="help">Your story in your own words: background, what you work on, why you teach. Leave an empty line to start a new paragraph.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-teach">how I teach <code>teaching_approach</code> <span class="opt">optional</span></label>
+                    <textarea id="f-teach" name="teaching_approach" rows="4" maxlength="3000">{{ form.teaching_approach }}</textarea>
+                    <div class="help">What students can expect from your classes.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>contact &amp; links</b><span class="opt">optional</span><span>public: only add what you are happy to show</span></header>
+            <div class="body f-grid">
+                <div class="field">
+                    <label class="l" for="f-email">email <code>email</code></label>
+                    <input id="f-email" type="text" name="email" value="{{ form.email }}" inputmode="email" placeholder="name@example.com">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-phone">phone / WhatsApp <code>phone</code></label>
+                    <input id="f-phone" type="text" name="phone" value="{{ form.phone }}" inputmode="tel" placeholder="+880 1XXX-XXXXXX">
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-website">website / portfolio <code>website</code></label>
+                    <input id="f-website" type="text" name="website" value="{{ form.website }}" placeholder="https://…">
+                </div>
+                <div class="field span2">
+                    <label class="l">social &amp; professional profiles <code>socials</code></label>
+                    {{ repeater('socials', form.socials, social_fields, 'add a link', 'No links yet. LinkedIn and GitHub are the ones students look for first.') }}
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>CV</b><span class="opt">optional</span><span>PDF · max 5 MB · opens in a new tab on the profile page</span></header>
+            <div class="body">
+                <input type="hidden" name="remove_cv" id="f-remove-cv" value="">
+                <input type="file" name="cv" id="f-cv" accept="application/pdf,.pdf" hidden>
+                <div class="cvbox" id="cv-box" data-state="{{ 'current' if cv else 'empty' }}">
+                    <div class="cv-line cv-empty">
+                        <span class="dim">No CV attached.</span>
+                        <button type="button" class="a-btn small primary" id="cv-choose">choose PDF</button>
+                    </div>
+                    <div class="cv-line cv-current">
+                        <span class="cv-ico" aria-hidden="true">📄</span>
+                        <span><b>cv.pdf</b> <span class="dim">· {{ cv_size|filesize }}</span></span>
+                        {% if cv %}<a class="a-btn small" href="{{ url_for('static', filename=cv) }}" target="_blank" rel="noopener">open ↗</a>{% endif %}
+                        <button type="button" class="a-btn small" id="cv-replace">replace</button>
+                        <button type="button" class="a-btn small danger" id="cv-remove">✕ remove</button>
+                    </div>
+                    <div class="cv-line cv-new">
+                        <span class="cv-ico" aria-hidden="true">📄</span>
+                        <span id="cv-new-name"></span>
+                        <button type="button" class="a-btn small danger" id="cv-cancel">✕ cancel</button>
+                    </div>
+                    <div class="cv-line cv-removed">
+                        <span class="warn-text">The CV will be removed when you save.</span>
+                        <button type="button" class="linklike" id="cv-undo">undo</button>
+                    </div>
+                    <div class="up-status" id="cv-status" role="status" aria-live="polite"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>expertise &amp; languages</b><span class="opt">optional</span></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-expertise">fields of expertise <code>expertise</code> — one per line or comma-separated</label>
+                    <textarea id="f-expertise" name="expertise" rows="4" placeholder="Python&#10;Data analysis&#10;Automation">{{ form.expertise }}</textarea>
+                    <div class="help">Shown as tags on the profile.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-languages">languages spoken <code>languages</code> — one per line or comma-separated</label>
+                    <textarea id="f-languages" name="languages" rows="2" placeholder="Bangla (native), English (fluent)">{{ form.languages }}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>education</b><span class="opt">optional</span><span>students and recent graduates: add what you are studying or have just finished</span></header>
+            <div class="body">{{ repeater('education', form.education, edu_fields, 'add education', 'Nothing added. Skip this if it does not apply.') }}</div>
+        </section>
+
+        <section class="panel">
+            <header><b>experience</b><span class="opt">optional</span><span>jobs, internships, freelance, teaching · newest first</span></header>
+            <div class="body">{{ repeater('experience', form.experience, exp_fields, 'add experience', 'No work experience listed. That is perfectly fine for students and fresh graduates: use “projects & achievements” below instead.') }}</div>
+        </section>
+
+        <section class="panel">
+            <header><b>certifications</b><span class="opt">optional</span></header>
+            <div class="body">{{ repeater('certifications', form.certifications, cert_fields, 'add certification', 'Nothing added.') }}</div>
+        </section>
+
+        <section class="panel">
+            <header><b>projects &amp; achievements</b><span class="opt">optional</span><span>personal projects, competitions, awards, open-source work</span></header>
+            <div class="body">{{ repeater('achievements', form.achievements, ach_fields, 'add project or achievement', 'Nothing added.') }}</div>
+        </section>
+
+        <section class="panel">
+            <header><b>extra sections</b><span class="opt">optional</span><span>anything else that builds trust: publications, awards, volunteering, talks …</span></header>
+            <div class="body">{{ repeater('sections', form.sections, section_fields, 'add a section', 'No extra sections.') }}</div>
+        </section>
+
+        <div class="savebar" id="savebar">
+            <button class="a-btn primary" type="submit">{{ 'create instructor' if creating else 'save changes' }}</button>
+            <a class="a-btn" href="{{ url_for('admin.instructors_list') }}">cancel</a>
+            <span class="dirty">● unsaved changes</span>
+        </div>
+    </div>
+
+    <aside class="sticky">
+        <section class="panel">
+            <header><b>profile strength</b><span id="strength-n"></span></header>
+            <div class="body">
+                <div class="meter"><i id="strength-bar"></i></div>
+                <ul class="checks" id="checks">
+                    {% for key, label in checks %}<li data-check="{{ key }}"><span class="mark"></span>{{ label }}</li>{% endfor %}
+                </ul>
+                <div class="help">Only name is required. A fuller profile looks more trustworthy, but skip anything that does not apply.</div>
+            </div>
+        </section>
+        {% if not creating and used_in %}
+        <section class="panel">
+            <header><b>used in</b></header>
+            <div class="body"><ul class="plainlist">{% for t in used_in %}<li>{{ t }}</li>{% endfor %}</ul>
+                <div id="rename-note" class="warn-text" hidden>Renaming will update these {{ used_in|length }} course(s) automatically.</div></div>
+        </section>
+        {% endif %}
+        <section class="panel">
+            <header><b>profile.json</b><span>live preview of what will be written</span></header>
+            <div class="body"><pre class="code wrap" id="json-preview"></pre></div>
+        </section>
+        {% if not creating %}
+        <section class="panel danger">
+            <header><b>danger zone</b></header>
+            <div class="body">
+                <p class="dim" style="margin-top:0">Delete moves the folder (photo and CV included) to _trash/. The profile disappears from the public site at once and can be restored from the Trash page.{% if used_in %} Courses that list this name will show it as plain text.{% endif %}</p>
+                <button class="a-btn danger" type="submit" form="delete-form">move to trash</button>
+            </div>
+        </section>
+        {% endif %}
+    </aside>
+</div>
+</form>
+
+{% if not creating %}
+<form id="delete-form" method="post" action="{{ url_for('admin.instructor_delete', slug=slug) }}" data-confirm="Move '{{ slug }}' to trash? You can restore it later.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var form = document.getElementById('editor');
+    var savebar = document.getElementById('savebar');
+    var dirty = false, creating = {{ 'true' if creating else 'false' }};
+    var originalName = {{ form.name|tojson }};
+
+    function val(name) { var el = form.elements[name]; return el ? el.value.trim() : ''; }
+    function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function fmtSize(n) { return n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+    function tags(text) {
+        var seen = {}, out = [];
+        text.split(/[\n,]/).forEach(function (t) { t = t.trim(); if (t && !seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; out.push(t); } });
+        return out;
+    }
+    function rows(name, fields) {
+        var out = [];
+        document.querySelectorAll('.rep[data-rep="' + name + '"] .rep-rows .rep-row').forEach(function (r) {
+            var o = {}, any = false;
+            fields.forEach(function (f) { var el = r.querySelector('[name$="-' + f + '"]'); o[f] = el ? el.value.trim() : ''; if (o[f]) any = true; });
+            if (any) out.push(o);
+        });
+        return out;
+    }
+    var ENTRY = {{ entry_fields|tojson }};
+
+    /* ---------- live profile.json preview + strength checklist ---------- */
+    function highlight(text) {
+        return esc(text).replace(/("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d+)?/g, function (m, str, colon, lit) {
+            if (str) return '<span class="' + (colon ? 'j-key' : 'j-str') + '">' + str + '</span>' + (colon || '');
+            if (lit) return '<span class="j-lit">' + m + '</span>';
+            return '<span class="j-num">' + m + '</span>';
+        });
+    }
+    var state = { photo: {{ 'true' if photo else 'false' }}, cv: {{ 'true' if cv else 'false' }} };
+    function collect() {
+        var p = { name: val('name') };
+        ['role', 'bio', 'biography', 'teaching_approach', 'location', 'email', 'phone', 'website'].forEach(function (k) { if (val(k)) p[k] = val(k); });
+        var socials = rows('socials', ['platform', 'url']).filter(function (r) { return r.url; });
+        if (socials.length) p.socials = socials;
+        var ex = tags(val('expertise')); if (ex.length) p.expertise = ex;
+        var lg = tags(val('languages')); if (lg.length) p.languages = lg;
+        Object.keys(ENTRY).forEach(function (k) { var r = rows(k, ENTRY[k]); if (r.length) p[k] = r; });
+        var secs = rows('sections', ['title', 'items']).filter(function (r) { return r.title && r.items; })
+            .map(function (r) { return { title: r.title, items: r.items.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean) }; });
+        if (secs.length) p.sections = secs;
+        var order = parseInt(val('order'), 10);
+        p.order = isNaN(order) ? 100 : order;
+        p.published = !!form.elements['published'].checked;
+        return p;
+    }
+    function renderChecks(p) {
+        var ok = {
+            photo: state.photo, bio: !!p.bio, biography: !!p.biography,
+            contact: !!(p.email || p.phone || p.website || (p.socials && p.socials.length)),
+            cv: state.cv, expertise: !!p.expertise, education: !!p.education, experience: !!p.experience,
+            more: !!(p.certifications || p.achievements || p.sections)
+        }, done = 0, total = 0;
+        document.querySelectorAll('#checks li').forEach(function (li) {
+            var on = ok[li.getAttribute('data-check')]; total++; if (on) done++;
+            li.classList.toggle('on', !!on);
+        });
+        document.getElementById('strength-n').textContent = done + ' / ' + total;
+        document.getElementById('strength-bar').style.width = Math.round(done * 100 / total) + '%';
+    }
+    function refresh() {
+        var p = collect();
+        document.getElementById('json-preview').innerHTML = highlight(JSON.stringify(p, null, 4));
+        renderChecks(p);
+        var note = document.getElementById('rename-note');
+        if (note) note.hidden = creating || val('name').toLowerCase().replace(/\s+/g, ' ') === originalName.toLowerCase().replace(/\s+/g, ' ');
+    }
+    function markDirty() { dirty = true; savebar.classList.add('is-dirty'); }
+    form.addEventListener('input', function () { refresh(); markDirty(); });
+    form.addEventListener('change', function () { refresh(); markDirty(); });
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    function changed() { form.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    /* ---------- folder name suggestion while typing the name (new instructors only) ---------- */
+    if (creating) {
+        var slugBox = document.getElementById('f-slug'), touched = !!slugBox.value;
+        slugBox.addEventListener('input', function () { touched = true; });
+        form.elements['name'].addEventListener('input', function () {
+            if (touched) return;
+            slugBox.value = this.value.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+        });
+    }
+
+    /* ---------- repeatable rows ---------- */
+    function syncEmpty(rep) {
+        rep.querySelector('.rep-empty').hidden = rep.querySelectorAll('.rep-rows .rep-row').length > 0;
+    }
+    document.querySelectorAll('.rep').forEach(function (rep) {
+        rep.addEventListener('click', function (e) {
+            var btn = e.target.closest('button');
+            if (!btn) return;
+            if (btn.hasAttribute('data-add')) {
+                var n = parseInt(rep.getAttribute('data-next'), 10);
+                rep.setAttribute('data-next', n + 1);
+                var holder = document.createElement('div');
+                holder.innerHTML = rep.querySelector('template').innerHTML.replace(/__i__/g, n);
+                var row = holder.firstElementChild;
+                rep.querySelector('.rep-rows').appendChild(row);
+                var first = row.querySelector('input, textarea'); if (first) first.focus();
+                syncEmpty(rep); changed();
+            } else if (btn.hasAttribute('data-remove')) {
+                btn.closest('.rep-row').remove(); syncEmpty(rep); changed();
+            } else if (btn.hasAttribute('data-move')) {
+                var row2 = btn.closest('.rep-row'), dir = parseInt(btn.getAttribute('data-move'), 10);
+                var sib = dir < 0 ? row2.previousElementSibling : row2.nextElementSibling;
+                if (sib) { dir < 0 ? row2.parentNode.insertBefore(row2, sib) : row2.parentNode.insertBefore(sib, row2); changed(); }
+            }
+        });
+    });
+
+    /* ---------- photo uploader ---------- */
+    var up = document.getElementById('ph-uploader'), frame = document.getElementById('ph-frame');
+    var img = document.getElementById('ph-img'), phStatus = document.getElementById('ph-status');
+    var phInput = document.getElementById('f-photo'), phFlag = document.getElementById('f-remove-photo');
+    var currentSrc = img.getAttribute('data-current-src'), objectUrl = null;
+    var IMAGES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    function phState(s, msg, kind) {
+        up.setAttribute('data-state', s);
+        phStatus.className = 'up-status ' + (kind || ''); phStatus.innerHTML = msg || '';
+        if (s === 'current') { img.src = currentSrc; img.hidden = false; } else if (s === 'new') { img.hidden = false; } else { img.hidden = true; }
+        state.photo = (s === 'current' || s === 'new');
+    }
+    function phPick(file) {
+        if (!file) return;
+        if (IMAGES.indexOf(file.type) === -1) { phStatus.className = 'up-status bad'; phStatus.textContent = '✗ Use a JPG, PNG, WEBP or GIF image.'; phInput.value = ''; return; }
+        if (file.size > 5 * 1024 * 1024) { phStatus.className = 'up-status bad'; phStatus.textContent = '✗ That image is ' + fmtSize(file.size) + '. The limit is 5 MB.'; phInput.value = ''; return; }
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(file); img.src = objectUrl; phFlag.value = '';
+        phState('new', '<b>' + esc(file.name) + '</b> · ' + fmtSize(file.size) + ' — will be saved with the profile', 'ok'); changed();
+    }
+    document.getElementById('ph-remove').addEventListener('click', function () {
+        if (up.getAttribute('data-state') === 'new') {
+            phInput.value = ''; if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+            phState(currentSrc && phFlag.value !== 'on' ? 'current' : 'empty', '');
+        } else {
+            phFlag.value = 'on';
+            phState('empty', 'The photo will be removed when you save. <button type="button" class="linklike" id="ph-undo">undo</button>', 'warn');
+        }
+        changed();
+    });
+    phStatus.addEventListener('click', function (e) { if (e.target.id === 'ph-undo') { phFlag.value = ''; phState('current', ''); changed(); } });
+    document.getElementById('ph-replace').addEventListener('click', function () { phInput.click(); });
+    frame.addEventListener('click', function (e) { if (!e.target.closest('.up-actions') && up.getAttribute('data-state') === 'empty') phInput.click(); });
+    frame.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target === frame && up.getAttribute('data-state') === 'empty') { e.preventDefault(); phInput.click(); } });
+    phInput.addEventListener('change', function () { phPick(phInput.files[0]); });
+    ['dragenter', 'dragover'].forEach(function (ev) { frame.addEventListener(ev, function (e) { e.preventDefault(); frame.classList.add('drag'); }); });
+    ['dragleave', 'drop'].forEach(function (ev) { frame.addEventListener(ev, function (e) { e.preventDefault(); frame.classList.remove('drag'); }); });
+    frame.addEventListener('drop', function (e) {
+        var f = e.dataTransfer.files[0]; if (!f) return;
+        try { var dt = new DataTransfer(); dt.items.add(f); phInput.files = dt.files; } catch (err) { /* old browsers */ }
+        phPick(f);
+    });
+
+    /* ---------- CV uploader ---------- */
+    var cvBox = document.getElementById('cv-box'), cvInput = document.getElementById('f-cv'), cvFlag = document.getElementById('f-remove-cv');
+    var cvStatus = document.getElementById('cv-status');
+    function cvState(s, msg, kind) {
+        cvBox.setAttribute('data-state', s); cvStatus.className = 'up-status ' + (kind || ''); cvStatus.textContent = msg || '';
+        state.cv = (s === 'current' || s === 'new');
+    }
+    document.getElementById('cv-choose').addEventListener('click', function () { cvInput.click(); });
+    document.getElementById('cv-replace').addEventListener('click', function () { cvInput.click(); });
+    cvInput.addEventListener('change', function () {
+        var f = cvInput.files[0]; if (!f) return;
+        if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { cvInput.value = ''; cvStatus.className = 'up-status bad'; cvStatus.textContent = '✗ The CV must be a PDF file.'; return; }
+        if (f.size > 5 * 1024 * 1024) { cvInput.value = ''; cvStatus.className = 'up-status bad'; cvStatus.textContent = '✗ That PDF is ' + fmtSize(f.size) + '. The limit is 5 MB.'; return; }
+        cvFlag.value = ''; document.getElementById('cv-new-name').innerHTML = '<b>' + esc(f.name) + '</b> <span class="dim">· ' + fmtSize(f.size) + ' — will be saved with the profile</span>';
+        cvState('new', ''); changed();
+    });
+    document.getElementById('cv-cancel').addEventListener('click', function () {
+        cvInput.value = ''; cvState({{ 'true' if cv else 'false' }} && cvFlag.value !== 'on' ? 'current' : 'empty', ''); changed();
+    });
+    document.getElementById('cv-remove').addEventListener('click', function () { cvFlag.value = 'on'; cvState('removed', ''); changed(); });
+    document.getElementById('cv-undo').addEventListener('click', function () { cvFlag.value = ''; cvState('current', ''); changed(); });
+
+    /* ---------- misc ---------- */
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+            e.preventDefault();
+            if (form.reportValidity()) { dirty = false; form.submit(); }
+        }
+    });
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg) { if (!window.confirm(msg)) e.preventDefault(); else dirty = false; }
+    });
+    phState(up.getAttribute('data-state'), '');
+    cvState(cvBox.getAttribute('data-state'), '');
+    refresh();
+})();
+</script>
+{% endblock %}

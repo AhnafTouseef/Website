@@ -1,0 +1,17 @@
+{# Price display shared by the cards and the course page.
+   Normal course:      Tk 500.00
+   Discounted course:  ~~Tk 500.00~~  Tk 425.00  [15% OFF]   (old price grey and struck through, new price in the vivid sale colour)
+   `size` can be 'big' for the course page price box. #}
+{% macro price_block(course, size='') %}
+{% if course.discount %}
+<span class="price-stack {{ size }}">
+    <span class="price-line">
+        <s class="price-old"><span class="sr-only">Original price </span>{{ course.price_original }}</s>
+        <span class="price-off">{{ course.discount }}% OFF</span>
+    </span>
+    <span class="price-new"><span class="sr-only">Now </span>{{ course.price }}</span>
+</span>
+{% else %}
+<span class="course-price {{ size }}">{{ course.price }}</span>
+{% endif %}
+{% endmacro %}

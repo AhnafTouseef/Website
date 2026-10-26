@@ -1,0 +1,32 @@
+{# Repeatable entry rows (education, experience, links, …). Fields are named <section>-<n>-<field>;
+   the server reads them in the order they appear, so the up/down buttons really reorder. #}
+{% macro rep_row(name, idx, row, fields) %}
+<div class="rep-row">
+    <div class="rep-fields">
+        {% for f in fields %}
+        <div class="field {{ f.cls or '' }}">
+            <label class="l">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
+            {% if f.area %}
+            <textarea name="{{ name }}-{{ idx }}-{{ f.key }}" rows="{{ f.rows or 2 }}" placeholder="{{ f.ph or '' }}">{{ row.get(f.key, '') }}</textarea>
+            {% else %}
+            <input type="text" name="{{ name }}-{{ idx }}-{{ f.key }}" value="{{ row.get(f.key, '') }}" placeholder="{{ f.ph or '' }}"{% if f.list %} list="{{ f.list }}"{% endif %} autocomplete="off">
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <div class="rep-ctl">
+        <button type="button" class="a-btn small" data-move="-1" title="move up" aria-label="move up">↑</button>
+        <button type="button" class="a-btn small" data-move="1" title="move down" aria-label="move down">↓</button>
+        <button type="button" class="a-btn small danger" data-remove title="remove this entry" aria-label="remove this entry">✕</button>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro repeater(name, rows, fields, add_label, hint) %}
+<div class="rep" data-rep="{{ name }}" data-next="{{ rows|length }}">
+    <div class="rep-rows">{% for r in rows %}{{ rep_row(name, loop.index0, r, fields) }}{% endfor %}</div>
+    <div class="rep-empty dim"{% if rows %} hidden{% endif %}>{{ hint }}</div>
+    <button type="button" class="a-btn small" data-add>+ {{ add_label }}</button>
+    <template>{{ rep_row(name, '__i__', {}, fields) }}</template>
+</div>
+{% endmacro %}

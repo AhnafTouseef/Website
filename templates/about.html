@@ -22,12 +22,13 @@
 
 <section class="container team-section grid-2">
     {% for member in team_members %}
-    <div class="team-card white-card">
+    <a class="team-card white-card" href="{{ url_for('instructor_profile', slug=member.slug) }}">
         <!-- <div class="avatar large">{{ member.avatar }}</div> -->
         <h3>{{ member.name }}</h3>
         <p class="team-role">{{ member.role }}</p>
         <p>{{ member.bio }}</p>
-    </div>
+        <p class="team-more">View profile →</p>
+    </a>
     {% endfor %}
 </section>
 

@@ -1,5 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
+{% from "_macros.html" import price_block %}
+{% macro curriculum_sheet(sheet) %}
+<div class="section-header">
+    <h2>Curriculum</h2>
+</div>
+{# The instructor's own sheet, shown exactly as written: any columns, any rows. #}
+<div class="sheet-wrap" tabindex="0" role="region" aria-label="Curriculum">
+    <table class="sheet">
+        <thead>
+            <tr>{% for h in sheet.header %}<th scope="col">{{ h|cell }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+            {% for row in sheet.rows %}
+            <tr>{% for c in row %}<td{% if c.cont %} class="cont"{% endif %}>{{ c.text|cell }}</td>{% endfor %}</tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endmacro %}
+
 <section class="hero hero-dark course-hero">
     <div class="container hero-grid">
         <div class="hero-copy">
@@ -48,25 +68,8 @@
         </div>
         {% endif %}
 
-        {% if course.curriculum %}
-        <div class="section-header">
-            <h2>Curriculum</h2>
-        </div>
-        <div class="accordion">
-            {% for item in course.curriculum %}
-            <div class="accordion-item {% if loop.first %}open{% endif %}">
-                <button type="button" class="accordion-summary">{{ item.week_range }}</button>
-                <div class="accordion-panel">
-                    <ul>
-                        {% for detail in item.details %}
-                        <li>{{ detail }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
+        {# narrow sheets sit in the main column; sheets with many columns get the full page width below #}
+        {% if course.curriculum and course.curriculum.ncols <= 3 %}{{ curriculum_sheet(course.curriculum) }}{% endif %}
 
         {% if course.instructors %}
         <div class="section-header">
@@ -74,14 +77,15 @@
         </div>
         <div class="team-grid">
             {% for member in course.instructors %}
-            <div class="team-card">
+            {% if member.slug %}<a class="team-card" href="{{ url_for('instructor_profile', slug=member.slug) }}">{% else %}<div class="team-card">{% endif %}
                 {% if member.photo %}
                 <img class="instructor-photo" src="{{ url_for('static', filename=member.photo) }}" alt="{{ member.name }}">
                 {% endif %}
                 <h3>{{ member.name }}</h3>
                 {% if member.role %}<p class="team-role">{{ member.role }}</p>{% endif %}
                 {% if member.bio %}<p>{{ member.bio }}</p>{% endif %}
-            </div>
+                {% if member.slug %}<p class="team-more">View profile →</p>{% endif %}
+            {% if member.slug %}</a>{% else %}</div>{% endif %}
             {% endfor %}
         </div>
         {% endif %}
@@ -89,7 +93,7 @@
     <aside class="pricing-sidebar">
         <div class="pricing-card">
             <span class="section-label">Course Price</span>
-            <h2>{{ course.price }}</h2>
+            {% if course.discount %}{{ price_block(course, 'big') }}{% else %}<h2>{{ course.price }}</h2>{% endif %}
             <p class="subtle">One-time payment · Full access</p>
             {% if course.features %}
             <ul class="feature-list">
@@ -105,4 +109,10 @@
         </div>
     </aside>
 </section>
+
+{% if course.curriculum and course.curriculum.ncols > 3 %}
+<section class="container course-sheet">
+    {{ curriculum_sheet(course.curriculum) }}
+</section>
+{% endif %}
 {% endblock %}
