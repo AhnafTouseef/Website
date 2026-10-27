@@ -1,0 +1,311 @@
+{% extends "admin_base.html" %}
+{% from "_admin_macros.html" import repeater %}
+{% block title %}{{ 'new webinar' if creating else slug }}{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>{% if creating %}new webinar{% else %}edit {{ slug }}{% endif %}</h1>
+    <span class="sub">{% if creating %}creates static/webinars/&lt;folder&gt;/ with webinar.json{% else %}static/webinars/{{ slug }}/{% endif %}</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('admin.webinars_list') }}">← back</a>
+        {% if not creating and form.published and not load_error %}<a class="a-btn" href="{{ url_for('webinar') }}#{{ slug }}" target="_blank" rel="noopener">view on site ↗</a>{% endif %}
+    </div>
+</div>
+
+<div class="a-note">Only the <b>title</b> is required. Give a <b>date and start time</b> (Bangladesh time): the join link appears on the site at that moment, never before. Nobody knows how long a webinar will run, so there is no end time: when it is over, hide or delete it. Site time now: <b>{{ now_label }}</b>.</div>
+
+{% if load_error %}
+<div class="errors">webinar.json could not be read ({{ load_error }}). The form starts from empty values; saving will replace the broken file with a clean one.</div>
+{% endif %}
+{% if errors %}
+<div class="errors"><b>Not saved. Fix these first:</b><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" id="editor" autocomplete="off">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<div class="split">
+    <div>
+        <section class="panel">
+            <header><b>the webinar</b><span>required</span></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-title">title <code>title</code> <span class="req">*</span></label>
+                    <input id="f-title" type="text" name="title" value="{{ form.title }}" maxlength="120" required>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-slug">folder name <code>(URL slug)</code></label>
+                    {% if creating %}
+                    <input id="f-slug" type="text" name="slug" value="{{ form.slug }}" placeholder="python-kickoff" maxlength="60" required>
+                    <div class="help">lowercase letters, digits, single hyphens. Cannot be changed later.</div>
+                    {% else %}
+                    <input id="f-slug" type="text" value="{{ slug }}" readonly>
+                    <div class="help">fixed after creation (links to the webinar use it).</div>
+                    {% endif %}
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-subtitle">one-line summary <code>subtitle</code> <span class="opt">optional</span></label>
+                    <input id="f-subtitle" type="text" name="subtitle" value="{{ form.subtitle }}" maxlength="160" placeholder="Meet us before you enroll">
+                    <div class="help">Shown under the title, in the home slider and on the notice rows.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-description">description <code>description</code> <span class="opt">optional</span></label>
+                    <textarea id="f-description" name="description" rows="5" maxlength="6000">{{ form.description }}</textarea>
+                    <div class="help">Leave an empty line to start a new paragraph.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>when</b><span class="opt">optional</span><span>Bangladesh time · leave both empty for “date to be announced”</span></header>
+            <div class="body">
+                <div class="when-row">
+                    <div class="field">
+                        <label class="l" for="f-date">date <code>date</code></label>
+                        <input id="f-date" type="date" name="date" value="{{ form.date }}">
+                    </div>
+                    <div class="field">
+                        <label class="l" for="f-time">start time <code>time</code></label>
+                        <input id="f-time" type="time" name="time" value="{{ form.time }}">
+                        <div class="help">24-hour clock, e.g. 10:00 or 16:30.</div>
+                    </div>
+                </div>
+                <div class="help" id="when-preview" style="margin-top:.6rem"></div>
+                {% if state_note %}<div class="help" style="margin-top:.3rem"><b>Right now:</b> {{ state_note }}</div>{% endif %}
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>links &amp; place</b><span class="opt">optional</span></header>
+            <div class="body f-grid">
+                <div class="field span2">
+                    <label class="l" for="f-join">join link <code>join_link</code></label>
+                    <input id="f-join" type="text" name="join_link" value="{{ form.join_link }}" placeholder="https://zoom.us/j/…">
+                    <div class="help">Hidden from visitors until the start time. Then it becomes the “Join the webinar” button.</div>
+                </div>
+                <div class="field span2">
+                    <label class="l" for="f-rsvp">“let us know you're coming” link <code>rsvp_link</code></label>
+                    <input id="f-rsvp" type="text" name="rsvp_link" value="{{ form.rsvp_link }}" placeholder="https://forms.gle/…">
+                    <div class="help">Optional headcount form. Always visible; it does not gate entry, anyone can join.</div>
+                </div>
+                <div class="field">
+                    <label class="l" for="f-platform">platform <code>platform</code></label>
+                    <input id="f-platform" type="text" name="platform" value="{{ form.platform }}" maxlength="60" placeholder="Zoom">
+                </div>
+                <div class="field">
+                    <label class="l" for="f-capacity">capacity note <code>capacity</code></label>
+                    <input id="f-capacity" type="text" name="capacity" value="{{ form.capacity }}" maxlength="80" placeholder="Limited to 100 participants">
+                    <div class="help">Display only. Nothing is counted or blocked.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>agenda</b><span class="opt">optional</span><span>“what we'll cover”</span></header>
+            <div class="body">{{ repeater('agenda', form.agenda, [
+                {'key': 'time', 'label': 'Time (optional)', 'ph': '10:00'},
+                {'key': 'item', 'label': 'What happens', 'ph': 'Welcome & introductions', 'required': true}],
+                'add agenda line', 'No agenda. Add a few lines if you want visitors to see the plan.') }}</div>
+        </section>
+
+        <section class="panel">
+            <header><b>presenters</b><span class="opt">optional</span><span>instructors from the Instructors section</span></header>
+            <div class="body">
+                {% if speaker_options %}
+                <div class="people">{% for name in speaker_options %}<label class="chk"><input type="checkbox" name="speakers" value="{{ name }}" {% if name in form.speakers %}checked{% endif %}> {{ name }}</label>{% endfor %}</div>
+                {% else %}<div class="dim">No instructors yet. <a href="{{ url_for('admin.instructor_new') }}">Add one →</a></div>{% endif %}
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>linked courses</b><span class="opt">optional</span><span>the course page then points to this webinar</span></header>
+            <div class="body">
+                {% if course_options %}
+                <div class="people">{% for c in course_options %}<label class="chk"><input type="checkbox" name="courses" value="{{ c.slug }}" {% if c.slug in form.courses %}checked{% endif %}> {{ c.title }} <span class="sub">{{ c.slug }}</span></label>{% endfor %}</div>
+                {% else %}<div class="dim">No courses yet.</div>{% endif %}
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>cover picture</b><span class="opt">optional</span><span>3:2 crop · JPG / PNG / WEBP / GIF · max 5 MB · the stock webinar picture is used when empty</span></header>
+            <div class="body">
+                <input type="hidden" name="remove_cover" id="f-remove-cover" value="">
+                <input type="file" name="cover" id="f-cover" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                <div class="uploader cover" id="cv-uploader" data-state="{{ 'current' if cover else 'empty' }}">
+                    <div class="up-frame" id="cv-frame" tabindex="0" role="button" aria-label="Cover picture: click to choose an image, or drop one here">
+                        <img id="cv-img" alt="Cover preview" {% if cover %}src="{{ asset(cover) }}" data-current-src="{{ asset(cover) }}"{% else %}hidden{% endif %}>
+                        <div class="up-empty">
+                            <div class="up-icon" aria-hidden="true">🖼️</div>
+                            <div><b>Drop a picture here</b></div>
+                            <div class="dim">or click to choose</div>
+                        </div>
+                        <div class="up-actions">
+                            <button type="button" class="a-btn small" id="cv-replace">replace</button>
+                            <button type="button" class="a-btn small danger" id="cv-remove">✕ remove</button>
+                        </div>
+                    </div>
+                    <div class="up-status" id="cv-status" role="status" aria-live="polite"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <header><b>visibility</b></header>
+            <div class="body">
+                <label class="chk"><input type="checkbox" name="published" {% if form.published %}checked{% endif %}> <b>published</b></label>
+                <div class="help">Unticked = a draft, hidden everywhere on the public site.</div>
+            </div>
+        </section>
+
+        <div class="savebar" id="savebar">
+            <button class="a-btn primary" type="submit">{{ 'create webinar' if creating else 'save changes' }}</button>
+            <a class="a-btn" href="{{ url_for('admin.webinars_list') }}">cancel</a>
+            <span class="dirty">● unsaved changes</span>
+        </div>
+    </div>
+
+    <aside class="sticky">
+        <section class="panel">
+            <header><b>how it behaves</b></header>
+            <div class="body">
+                <ul class="plainlist">
+                    <li>Before the start time: listed as upcoming, join link hidden.</li>
+                    <li>From the start time: the join link shows. The page reloads itself once at that moment.</li>
+                    <li>It stays until you hide or delete it. Nothing is removed automatically.</li>
+                    <li>The soonest webinar is shown in full on the webinar page; the others are one line each.</li>
+                    <li>The nearest 3 dated webinars also get a slide in the home hero.</li>
+                </ul>
+            </div>
+        </section>
+        {% if not creating %}
+        <section class="panel danger">
+            <header><b>danger zone</b></header>
+            <div class="body">
+                <p class="dim" style="margin-top:0">Delete moves the folder to _trash/. The webinar disappears from the site at once and can be restored (as a hidden draft) from the Trash page.</p>
+                <button class="a-btn danger" type="submit" form="delete-form">move to trash</button>
+            </div>
+        </section>
+        {% endif %}
+    </aside>
+</div>
+</form>
+
+{% if not creating %}
+<form id="delete-form" method="post" action="{{ url_for('admin.webinar_delete', slug=slug) }}" data-confirm="Move '{{ slug }}' to trash? You can restore it later.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var form = document.getElementById('editor'), savebar = document.getElementById('savebar');
+    var dirty = false, creating = {{ 'true' if creating else 'false' }};
+    function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function fmtSize(n) { return n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+    function markDirty() { dirty = true; savebar.classList.add('is-dirty'); }
+    function changed() { form.dispatchEvent(new Event('change', { bubbles: true })); }
+    form.addEventListener('input', markDirty);
+    form.addEventListener('change', markDirty);
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+    /* folder name suggestion while typing the title (new webinars only) */
+    if (creating) {
+        var slugBox = document.getElementById('f-slug'), touched = !!slugBox.value;
+        slugBox.addEventListener('input', function () { touched = true; });
+        form.elements['title'].addEventListener('input', function () {
+            if (touched) return;
+            slugBox.value = this.value.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+        });
+    }
+
+    /* plain-words preview of the date and time */
+    var dateBox = document.getElementById('f-date'), timeBox = document.getElementById('f-time'), prev = document.getElementById('when-preview');
+    function whenPreview() {
+        if (!dateBox.value && !timeBox.value) { prev.textContent = 'No date: listed last as “date to be announced”.'; return; }
+        if (!dateBox.value || !timeBox.value) { prev.textContent = 'Fill in both the date and the start time.'; return; }
+        var p = dateBox.value.split('-'), t = timeBox.value.split(':');
+        var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+        var h = +t[0], ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 || 12;
+        prev.innerHTML = 'Visitors will read: <b>' + d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) + ' · ' + h12 + ':' + t[1] + ' ' + ap + ' (Bangladesh time)</b>';
+    }
+    dateBox.addEventListener('input', whenPreview); timeBox.addEventListener('input', whenPreview); whenPreview();
+
+    /* repeatable rows */
+    function syncEmpty(rep) { rep.querySelector('.rep-empty').hidden = rep.querySelectorAll('.rep-rows .rep-row').length > 0; }
+    document.querySelectorAll('.rep').forEach(function (rep) {
+        rep.addEventListener('click', function (e) {
+            var btn = e.target.closest('button');
+            if (!btn) return;
+            if (btn.hasAttribute('data-add')) {
+                var n = parseInt(rep.getAttribute('data-next'), 10);
+                rep.setAttribute('data-next', n + 1);
+                var holder = document.createElement('div');
+                holder.innerHTML = rep.querySelector('template').innerHTML.replace(/__i__/g, n);
+                var row = holder.firstElementChild;
+                rep.querySelector('.rep-rows').appendChild(row);
+                var first = row.querySelector('input, textarea'); if (first) first.focus();
+                syncEmpty(rep); changed();
+            } else if (btn.hasAttribute('data-remove')) {
+                btn.closest('.rep-row').remove(); syncEmpty(rep); changed();
+            } else if (btn.hasAttribute('data-move')) {
+                var row2 = btn.closest('.rep-row'), dir = parseInt(btn.getAttribute('data-move'), 10);
+                var sib = dir < 0 ? row2.previousElementSibling : row2.nextElementSibling;
+                if (sib) { dir < 0 ? row2.parentNode.insertBefore(row2, sib) : row2.parentNode.insertBefore(sib, row2); changed(); }
+            }
+        });
+    });
+
+    /* cover uploader */
+    var up = document.getElementById('cv-uploader'), frame = document.getElementById('cv-frame');
+    var img = document.getElementById('cv-img'), status = document.getElementById('cv-status');
+    var input = document.getElementById('f-cover'), flag = document.getElementById('f-remove-cover');
+    var currentSrc = img.getAttribute('data-current-src'), objectUrl = null;
+    var IMAGES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    function setState(s, msg, kind) {
+        up.setAttribute('data-state', s);
+        status.className = 'up-status ' + (kind || ''); status.innerHTML = msg || '';
+        if (s === 'current') { img.src = currentSrc; img.hidden = false; } else if (s === 'new') { img.hidden = false; } else { img.hidden = true; }
+    }
+    function pick(file) {
+        if (!file) return;
+        if (IMAGES.indexOf(file.type) === -1) { status.className = 'up-status bad'; status.textContent = '✗ Use a JPG, PNG, WEBP or GIF image.'; input.value = ''; return; }
+        if (file.size > 5 * 1024 * 1024) { status.className = 'up-status bad'; status.textContent = '✗ That image is ' + fmtSize(file.size) + '. The limit is 5 MB.'; input.value = ''; return; }
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(file); img.src = objectUrl; flag.value = '';
+        setState('new', '<b>' + esc(file.name) + '</b> · ' + fmtSize(file.size) + ' — will be saved with the webinar', 'ok'); changed();
+    }
+    document.getElementById('cv-remove').addEventListener('click', function () {
+        if (up.getAttribute('data-state') === 'new') {
+            input.value = ''; if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+            setState(currentSrc && flag.value !== 'on' ? 'current' : 'empty', '');
+        } else {
+            flag.value = 'on';
+            setState('empty', 'The cover will be removed when you save. <button type="button" class="linklike" id="cv-undo">undo</button>', 'warn');
+        }
+        changed();
+    });
+    status.addEventListener('click', function (e) { if (e.target.id === 'cv-undo') { flag.value = ''; setState('current', ''); changed(); } });
+    document.getElementById('cv-replace').addEventListener('click', function () { input.click(); });
+    frame.addEventListener('click', function (e) { if (!e.target.closest('.up-actions') && up.getAttribute('data-state') === 'empty') input.click(); });
+    frame.addEventListener('keydown', function (e) { if ((e.key === 'Enter' || e.key === ' ') && e.target === frame && up.getAttribute('data-state') === 'empty') { e.preventDefault(); input.click(); } });
+    input.addEventListener('change', function () { pick(input.files[0]); });
+    ['dragenter', 'dragover'].forEach(function (ev) { frame.addEventListener(ev, function (e) { e.preventDefault(); frame.classList.add('drag'); }); });
+    ['dragleave', 'drop'].forEach(function (ev) { frame.addEventListener(ev, function (e) { e.preventDefault(); frame.classList.remove('drag'); }); });
+    frame.addEventListener('drop', function (e) {
+        var f = e.dataTransfer.files[0]; if (!f) return;
+        try { var dt = new DataTransfer(); dt.items.add(f); input.files = dt.files; } catch (err) { /* old browsers */ }
+        pick(f);
+    });
+    setState(up.getAttribute('data-state'), '');
+
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (form.reportValidity()) { dirty = false; form.submit(); } }
+    });
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg) { if (!window.confirm(msg)) e.preventDefault(); else dirty = false; }
+    });
+})();
+</script>
+{% endblock %}

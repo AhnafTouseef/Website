@@ -39,9 +39,9 @@
                 <a class="button button-primary" href="{{ course.enroll_link }}">Enroll{% if course.price %} — {{ course.price }}{% endif %} →</a>
                 {% endif %}
                 {% if course.webinar_link %}
-                <a class="text-link" href="{{ course.webinar_link }}" target="_blank" rel="noopener">Try free webinar first→</a>
-                {% else %}
-                <a class="text-link" href="{{ url_for('webinar') }}">Try free webinar first→</a>
+                <a class="text-link" href="{{ course.webinar_link }}" target="_blank" rel="noopener">Try our webinar first→</a>
+                {% elif linked_webinar %}
+                <a class="text-link" href="{{ url_for('webinar') }}#{{ linked_webinar.slug }}">Webinar: {{ linked_webinar.title }} · {{ linked_webinar.when_label }}→</a>
                 {% endif %}
             </div>
         </div>

@@ -34,12 +34,26 @@
 
     <div>
         <section class="panel">
+            <header><b>site time</b><span>Bangladesh time, taken from an online time service, never from a visitor's device</span></header>
+            <div class="body">
+                <dl class="kv">
+                    <dt>State</dt><dd><span class="chip {{ 'published' if clock.state in ('ok', 'fake', 'off') else 'hidden' }}">{{ clock.state }}</span> {{ clock.note }}</dd>
+                    {% if clock.source %}<dt>Service</dt><dd>{{ clock.source }}{% if clock.synced_at %} · checked {{ clock.synced_at|ago }}{% endif %}</dd>
+                    <dt>Server clock is</dt><dd>{{ '%+.1f'|format(clock.offset) }} s away from the real time{% if clock.offset|abs > 120 %} <b class="warn-text">(more than 2 minutes: this is why the site does not trust it)</b>{% endif %}</dd>{% endif %}
+                    {% for name, msg in clock.errors %}<dt>Failed</dt><dd class="dim">{{ name }}: {{ msg }}</dd>{% endfor %}
+                </dl>
+                <p class="dim mono-sm" style="margin:.8rem 0 0">Checked every 10 minutes in the background, so page loads never wait for it. If no service can be reached, the last correction is kept; with none at all the server clock is used.</p>
+            </div>
+        </section>
+
+        <section class="panel">
             <header><b>content sources</b></header>
             <div class="body">
                 <dl class="kv">
                     <dt>Courses</dt><dd>static/course/&lt;folder&gt;/ (meta.json, curriculum.csv, thumbnail.*)</dd>
                     <dt>Instructors</dt><dd>{{ instructors|length }} in static/instructors/&lt;folder&gt;/ (profile.json, photo.*)</dd>
-                    <dt>Logos</dt><dd>{{ logos|length }} in static/logo/ (one is picked at random per page view){% if logos %}<br><span class="dim">{{ logos|join(', ') }}</span>{% endif %}</dd>
+                    <dt>Webinars</dt><dd>static/webinars/&lt;folder&gt;/ (webinar.json, cover.*)</dd>
+                    <dt>Logos</dt><dd>{{ logos|length }} file(s) in static/logo/; the header currently shows <b>{{ brand_logo or 'the 📘 fallback' }}</b>. Change it on the <a href="{{ url_for('admin.branding') }}">branding</a> page.{% if logos %}<br><span class="dim">{{ logos|join(', ') }}</span>{% endif %}</dd>
                     <dt>Pipeline cards</dt><dd>{{ pipeline_count }} — in app.py (<span class="dim">pipeline_courses</span>)</dd>
                     <dt>FAQ entries</dt><dd>{{ faq_count }} — in app.py (<span class="dim">faq_questions</span>)</dd>
                 </dl>

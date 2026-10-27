@@ -14,11 +14,11 @@
     </div>
     {% endif %}
 
-    <header class="site-header">
+    <header class="site-header logo-{{ brand.header.align }}" style="--logo-h: {{ brand.header.height }}px; --logo-h-m: {{ brand.header.height_mobile }}px">
         <div class="container header-inner">
             <a class="brand" href="{{ url_for('home') }}">
-                {% if logo %}
-                <img src="{{ url_for('static', filename=('logo/' ~ logo)) }}" alt="Belajar.id" class="brand-mark site-logo" />
+                {% if brand.header.url %}
+                <img src="{{ brand.header.url }}" alt="Belajar.id" class="site-logo" />
                 {% else %}
                 <span class="brand-mark">📘</span>
                 {% endif %}
@@ -64,10 +64,10 @@
 
     <footer class="site-footer">
         <div class="container footer-grid">
-            <div>
-                <div class="footer-brand">
-                    {% if logo %}
-                    <img src="{{ url_for('static', filename=('logo/' ~ logo)) }}" alt="Belajar.id" class="brand-mark site-logo" />
+            <div class="footer-brand-col logo-{{ brand.footer.align }}" style="--logo-h: {{ brand.footer.height }}px; --logo-h-m: {{ brand.footer.height_mobile }}px">
+                <div class="footer-brand footer-logo-{{ brand.footer.style }}">
+                    {% if brand.footer.url %}
+                    <img src="{{ brand.footer.url }}" alt="Belajar.id" class="site-logo" />
                     {% else %}
                     <span class="brand-mark">📘</span>
                     {% endif %}
@@ -102,6 +102,16 @@
     </footer>
 
     <script>
+        /* A webinar's join link appears when its start time arrives (decided by the server, never by this device's clock).
+           This only waits the number of seconds the server said are left, then reloads once so the link shows up. */
+        (function () {
+            var min = Infinity;
+            document.querySelectorAll('[data-starts-in]').forEach(function (el) {
+                var n = parseInt(el.getAttribute('data-starts-in'), 10);
+                if (n > 0 && n < min) min = n;
+            });
+            if (min !== Infinity && min <= 86400) setTimeout(function () { location.reload(); }, Math.max(2, min) * 1000);
+        })();
         document.addEventListener('click', function (event) {
             if (event.target.matches('.accordion-summary')) {
                 var item = event.target.closest('.accordion-item');

@@ -1,0 +1,98 @@
+{% extends "admin_base.html" %}
+{% block title %}webinars{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>webinars</h1>
+    <span class="sub">{{ stats.total }} folder(s) in static/webinars/ · shown on the webinar page and in the home slider</span>
+    <div class="right">
+        <a class="a-btn primary" href="{{ url_for('admin.webinar_new') }}">+ add webinar</a>
+    </div>
+</div>
+
+<div class="a-note">
+    A webinar only has a <b>start time</b>, because nobody knows beforehand how long it will run. The join link appears on the site when that time arrives. Nothing is removed automatically: when a webinar is over, <b>hide</b> or <b>delete</b> it here. Site time now: <b>{{ now_label }}</b> (Bangladesh).
+    {% if clock.state in ('waiting', 'stale') %}<br><span class="warn-text">The online time check is {{ clock.state }}; see the <a href="{{ url_for('admin.system') }}">system</a> page.</span>{% endif %}
+</div>
+
+<div class="tiles">
+    <div class="tile ok"><div class="k">upcoming</div><div class="v">{{ stats.upcoming }}</div></div>
+    <div class="tile {{ 'warn' if stats.started }}"><div class="k">started, still shown</div><div class="v">{{ stats.started }}</div></div>
+    <div class="tile {{ 'warn' if stats.hidden }}"><div class="k">hidden</div><div class="v">{{ stats.hidden }}</div></div>
+    <div class="tile {{ 'bad' if stats.broken else 'ok' }}"><div class="k">broken</div><div class="v">{{ stats.broken }}</div></div>
+</div>
+
+<section class="panel">
+    <header><b>static/webinars/</b><span>soonest first · click “inspect” for problems found</span></header>
+    {% if webinars %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>webinar</th><th>visibility</th><th>time</th><th>join link</th><th>registration</th><th>courses</th><th>health</th><th>actions</th></tr></thead>
+        <tbody>
+        {% for w in webinars %}
+            <tr class="row">
+                <td>
+                    <div class="cell-title">{{ w.title }}</div>
+                    <div class="cell-slug">{{ w.slug }}</div>
+                    <details class="dd" style="margin-top:.3rem"><summary>inspect</summary></details>
+                </td>
+                <td><span class="chip {{ w.status }}">{{ w.status }}</span></td>
+                <td>
+                    {% if w.status != 'broken' %}
+                    <span class="chip {{ w.state }}">{{ {'upcoming': 'upcoming', 'started': 'started', 'tba': 'no date'}[w.state] }}</span>
+                    <div class="mono-sm">{{ w.when }}</div>
+                    {% if w.note %}<div class="dim mono-sm">{{ w.note }}</div>{% endif %}
+                    {% endif %}
+                </td>
+                <td>{{ '✓' if w.join else '—' }}</td>
+                <td>{{ '✓' if w.rsvp else '—' }}</td>
+                <td class="mono-sm">{% if w.courses %}{{ w.courses|join(', ') }}{% else %}<span class="dim">—</span>{% endif %}</td>
+                <td class="nowrap">
+                    {% if w.n_error %}<span class="chip err">{{ w.n_error }} err</span>{% endif %}
+                    {% if w.n_warn %}<span class="chip wrn">{{ w.n_warn }} warn</span>{% endif %}
+                    {% if not w.n_error and not w.n_warn %}<span class="chip ok">ok</span>{% endif %}
+                </td>
+                <td class="nowrap">
+                    <a class="a-btn small" href="{{ url_for('admin.webinar_edit', slug=w.slug) }}">edit</a>
+                    {% if w.status == 'published' %}<a class="a-btn small" href="{{ url_for('webinar') }}#{{ w.slug }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+                    {% if w.status != 'broken' %}
+                    <form class="inline" method="post" action="{{ url_for('admin.webinar_toggle', slug=w.slug) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small warn" type="submit">{{ 'hide' if w.status == 'published' else 'publish' }}</button>
+                    </form>
+                    {% endif %}
+                    <form class="inline" method="post" action="{{ url_for('admin.webinar_delete', slug=w.slug) }}" data-confirm="Move '{{ w.slug }}' to trash? You can restore it later.">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small danger" type="submit">delete</button>
+                    </form>
+                </td>
+            </tr>
+            <tr class="detail" hidden>
+                <td colspan="8">
+                    {% if w.issues %}<ul class="issues">{% for i in w.issues %}<li class="{{ i.level }}">{{ i.text }}</li>{% endfor %}</ul>
+                    {% else %}<div class="dim">no problems found</div>{% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty">static/webinars/ has no folders yet, so the public webinar page says no webinar is planned. <a href="{{ url_for('admin.webinar_new') }}">Add the first webinar →</a></div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    document.querySelectorAll('details.dd').forEach(function (d) {
+        var detailRow = d.closest('tr').nextElementSibling;
+        d.addEventListener('toggle', function () { detailRow.hidden = !d.open; });
+    });
+    document.addEventListener('submit', function (e) {
+        var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+})();
+</script>
+{% endblock %}

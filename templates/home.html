@@ -1,24 +1,79 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero hero-dark">
-    <div class="container hero-grid">
-        <div class="hero-copy">
-            <div class="hero-badge">✨ First Cohort · Python Programming</div>
-            <h1>Learn Skills That <span class="hero-emphasis">Actually</span> Matter</h1>
-            <p>We're two recent graduates who believe practical skills shouldn't cost a fortune or take years to acquire. Join a cohort that teaches real-world Python for students ready to build projects and launch faster.</p>
-            <div class="hero-actions">
-                <a class="button button-primary" href="{{ url_for('course_details') }}">Explore the Course →</a>
-                <a class="button button-outline" href="{{ url_for('webinar') }}">Join Free Webinar</a>
+{% set s = brand.slide %}
+{% set slide_count = 1 + hero_webinars|length %}
+<section class="hero hero-dark hs" id="hero-slider" aria-roledescription="carousel" aria-label="Highlights">
+    <div class="container">
+        <div class="hs-stage">
+
+            {# ---- slide 1: the brand slide (picture, headline and buttons are managed in the admin "branding" page) ---- #}
+            <div class="hs-slide is-active" data-slide aria-roledescription="slide" aria-label="1 of {{ slide_count }}">
+                <div class="hs-grid{{ ' hs-flip' if s.side == 'left' }}{{ ' hs-solo' if not s.image_url }}">
+                    <div class="hs-copy">
+                        {% if s.badge %}<div class="hs-badge">{{ s.badge }}</div>{% endif %}
+                        <h1 class="hs-title">{{ s.headline_parts[0] }}{% if s.headline_parts[1] %}<span class="hero-emphasis">{{ s.headline_parts[1] }}</span>{{ s.headline_parts[2] }}{% endif %}</h1>
+                        {% if s.text %}<p class="hs-text">{{ s.text }}</p>{% endif %}
+                        <div class="hero-actions">
+                            {% if s.primary_label %}<a class="button button-primary" href="{{ url_for('course_details') }}">{{ s.primary_label }} →</a>{% endif %}
+                            {% if s.secondary_label %}<a class="button button-outline" href="{{ url_for('about') }}">{{ s.secondary_label }}</a>{% endif %}
+                        </div>
+                    </div>
+                    {% if s.image_url %}
+                    <div class="hs-visual">
+                        <div class="hs-frame shape-{{ s.shape }}{{ ' tilt' if s.tilt }}" style="aspect-ratio: {{ '1 / 1' if s.shape == 'circle' else s.css_ratio }}">
+                            <img src="{{ s.image_url }}" alt="" style="object-fit: {{ s.fit }}; object-position: {{ s.x }}% {{ s.y }}%; transform: scale({{ '%.2f'|format(s.zoom / 100) }}); transform-origin: {{ s.x }}% {{ s.y }}%">
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
             </div>
+
+            {# ---- one slide per upcoming webinar (soonest first) ---- #}
+            {% for w in hero_webinars %}
+            <div class="hs-slide" data-slide aria-roledescription="slide" aria-label="{{ loop.index + 1 }} of {{ slide_count }}">
+                <div class="hs-grid">
+                    <div class="hs-copy">
+                        <div class="hs-badge hs-badge-live{{ ' is-now' if w.status == 'started' }}"><span class="hs-dot-live" aria-hidden="true"></span>{{ 'Live now' if w.status == 'started' else 'Live webinar' }}</div>
+                        <h2 class="hs-title">{{ w.title }}</h2>
+                        {% set blurb = w.subtitle or (w.paragraphs[0] if w.paragraphs else '') %}
+                        {% if blurb %}<p class="hs-text">{{ blurb|truncate(190) }}</p>{% endif %}
+                        <ul class="hs-facts">
+                            <li><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{{ w.time_label }} · Bangladesh time</li>
+                            {% if w.platform %}<li><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>{{ w.platform }}</li>{% endif %}
+                        </ul>
+                        <div class="hero-actions"{% if w.status == 'upcoming' %} data-starts-in="{{ w.starts_in }}"{% endif %}>
+                            {% if w.join_open %}
+                            <a class="button button-primary" href="{{ w.join_link }}" target="_blank" rel="noopener">Join the webinar →</a>
+                            <a class="button button-outline" href="{{ url_for('webinar') }}#{{ w.slug }}">Details</a>
+                            {% else %}
+                            <a class="button button-primary" href="{{ url_for('webinar') }}#{{ w.slug }}">See details →</a>
+                            {% if w.rsvp_link %}<a class="button button-outline" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">Let us know you're coming</a>{% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="hs-visual">
+                        <div class="hs-cover">
+                            <div class="hs-frame shape-rounded tilt" style="aspect-ratio: 3 / 2"><img src="{{ asset(w.cover) }}" alt="" style="object-fit: cover"></div>
+                            <div class="hs-date" aria-label="{{ w.date_label }}"><span>{{ w.month_short }}</span><b>{{ w.day }}</b><span>{{ w.weekday_short }}</span></div>
+                            <div class="hs-chip"><span class="hs-dot-live" aria-hidden="true"></span>{{ w.capacity or 'Open to everyone' }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
         </div>
-        <div class="hero-visual">
-            <div class="hero-photo"><img src="{{ url_for('static', filename='webinar.jpg') }}" alt="webinar">
-            <div class="hero-card">
-                <h3 class="hero-card-label">Next webinar session</h3>
-                <p>Saturday, July 12 · 10:00 AM </p>
+
+        {% if hero_webinars %}
+        <div class="hs-controls">
+            <button type="button" class="hs-arrow" data-dir="-1" aria-label="Previous slide"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <div class="hs-dots">
+                <button type="button" class="hs-dot is-active" data-go="0" aria-label="Show slide 1"><i></i></button>
+                {% for w in hero_webinars %}<button type="button" class="hs-dot" data-go="{{ loop.index }}" aria-label="Show slide {{ loop.index + 1 }}: {{ w.title }}"><i></i></button>{% endfor %}
             </div>
-            </div>
+            <button type="button" class="hs-arrow" data-dir="1" aria-label="Next slide"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+            <a class="hs-all" href="{{ url_for('webinar') }}">All webinars →</a>
         </div>
+        {% endif %}
     </div>
 </section>
 
@@ -64,15 +119,18 @@
     <p class="micro-copy">Want to suggest a course topic? Let us know →</p>
 </section>
 
+{% if hero_webinars %}
+{% set nw = hero_webinars[0] %}
 <section class="webinar-banner">
     <div class="container webinar-callout">
         <div>
             <h2>Ready to meet us live?</h2>
-            <p>Reserve a free seat in the intro webinar and see the course before you enroll.</p>
+            <p>{{ nw.title }} · {{ nw.when_label }} (Bangladesh time). Anyone can join.</p>
         </div>
-        <a class="button button-primary" href="{{ url_for('webinar') }}">Register for Free →</a>
+        <a class="button button-primary" href="{{ url_for('webinar') }}#{{ nw.slug }}">See the webinar →</a>
     </div>
 </section>
+{% endif %}
 
 <section class="container founder-preview grid-2">
     <div>
@@ -90,4 +148,51 @@
         <p class="photo-caption">Ahnaf & Shumon — Co-founders · Jashore, 2026</p>
     </div>
 </section>
+
+{% if hero_webinars %}
+<script>
+/* Home slider: the brand slide first, then one slide per webinar. Advances by itself every 6 seconds,
+   pauses while the pointer or keyboard focus is inside it or the tab is hidden, and never moves on its own
+   for visitors who asked their system for reduced motion. */
+(function () {
+    var root = document.getElementById('hero-slider');
+    if (!root) return;
+    var slides = root.querySelectorAll('[data-slide]'), dots = root.querySelectorAll('.hs-dot');
+    var current = 0, timer = null, SECONDS = 6, hovering = false, focusing = false;
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    root.style.setProperty('--hs-ms', SECONDS + 's');
+
+    function show(i) {
+        current = (i + slides.length) % slides.length;
+        slides.forEach(function (s, n) { s.classList.toggle('is-active', n === current); });
+        dots.forEach(function (d, n) {
+            d.classList.toggle('is-active', n === current);
+            if (n === current) d.setAttribute('aria-current', 'true'); else d.removeAttribute('aria-current');
+        });
+    }
+    function held() { return hovering || focusing || document.hidden; }
+    function stop() { clearTimeout(timer); timer = null; root.classList.add('is-paused'); }
+    function arm() {
+        clearTimeout(timer);
+        if (still || held()) { stop(); return; }
+        root.classList.remove('is-paused');
+        var active = root.querySelector('.hs-dot.is-active');          // restart the little progress bar
+        if (active) { active.classList.remove('is-active'); void active.offsetWidth; active.classList.add('is-active'); }
+        timer = setTimeout(function () { show(current + 1); arm(); }, SECONDS * 1000);
+    }
+    function go(i) { show(i); arm(); }
+
+    root.querySelectorAll('[data-dir]').forEach(function (b) {
+        b.addEventListener('click', function () { go(current + parseInt(b.getAttribute('data-dir'), 10)); });
+    });
+    dots.forEach(function (d) { d.addEventListener('click', function () { go(parseInt(d.getAttribute('data-go'), 10)); }); });
+    root.addEventListener('mouseenter', function () { hovering = true; stop(); });
+    root.addEventListener('mouseleave', function () { hovering = false; arm(); });
+    root.addEventListener('focusin', function (e) { if (e.target.matches && e.target.matches(':focus-visible')) { focusing = true; stop(); } });   // keyboard focus only: a mouse click must not freeze it
+    root.addEventListener('focusout', function (e) { if (!root.contains(e.relatedTarget)) { focusing = false; arm(); } });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) stop(); else arm(); });
+    show(0); arm();
+})();
+</script>
+{% endif %}
 {% endblock %}

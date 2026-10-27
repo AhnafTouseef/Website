@@ -15,6 +15,8 @@
             <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint in ('admin.dashboard', 'admin.course_edit') }}">courses</a>
             <a href="{{ url_for('admin.course_new') }}" class="{{ 'on' if request.endpoint == 'admin.course_new' }}">+ new</a>
             <a href="{{ url_for('admin.instructors_list') }}" class="{{ 'on' if request.endpoint in ('admin.instructors_list', 'admin.instructor_new', 'admin.instructor_edit') }}">instructors</a>
+            <a href="{{ url_for('admin.webinars_list') }}" class="{{ 'on' if request.endpoint in ('admin.webinars_list', 'admin.webinar_new', 'admin.webinar_edit') }}">webinars</a>
+            <a href="{{ url_for('admin.branding') }}" class="{{ 'on' if request.endpoint == 'admin.branding' }}">branding</a>
             <a href="{{ url_for('admin.trash') }}" class="{{ 'on' if request.endpoint == 'admin.trash' }}">trash{% if trash_count %} <span class="badge">({{ trash_count }})</span>{% endif %}</a>
             <a href="{{ url_for('admin.system') }}" class="{{ 'on' if request.endpoint == 'admin.system' }}">system</a>
         </nav>

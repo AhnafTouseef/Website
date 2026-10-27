@@ -172,7 +172,7 @@ pre.code.wrap { white-space: pre-wrap; word-break: break-word; }
 .field label.l { display: block; color: var(--a-dim); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.2rem; }
 .field label.l code { text-transform: none; letter-spacing: 0; color: var(--a-violet); }
 .field .help { color: var(--a-dim); font-size: 0.76rem; margin-top: 0.2rem; }
-.admin input[type=text], .admin input[type=password], .admin input[type=number], .admin textarea, .admin select {
+.admin input[type=text], .admin input[type=password], .admin input[type=number], .admin input[type=date], .admin input[type=time], .admin textarea, .admin select {
     width: 100%; font: inherit; color: #e6eef6;
     background: #0a0e13; border: 1px solid var(--a-line); border-radius: 0;
     padding: 0.4rem 0.6rem; outline: none;
@@ -324,3 +324,41 @@ a.tile.link:hover { border-color: var(--a-dim); }
 .cvbox[data-state="removed"] .cv-removed { display: flex; }
 .cvbox[data-state="current"] .cv-current, .cvbox[data-state="new"] .cv-new { border-style: solid; }
 .cv-ico { font-size: 1.3rem; }
+
+
+/* ---------- webinars + branding ---------- */
+.chip.draft { color: #7dd3fc; border-color: #1e4e6b; background: #0b2230; }
+.chip.upcoming { color: var(--a-green); border-color: #1e6b45; background: #0f2a1d; }
+.chip.started { color: var(--a-amber); border-color: #5a4514; background: #231c0b; }
+.chip.tba { color: var(--a-dim); border-color: var(--a-line); }
+.admin input[type=date], .admin input[type=time] { color-scheme: dark; }
+.uploader.cover { max-width: 420px; }
+.uploader.cover .up-frame { aspect-ratio: 3 / 2; }
+.when-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.9rem 1.1rem; }
+.pickrow { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; padding: 0.2rem 0; }
+.pickrow label { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.admin input[type=radio] { accent-color: var(--a-green); }
+.slider-line { display: grid; grid-template-columns: minmax(0, 1fr) 5.5rem; gap: 0.7rem; align-items: center; }
+.admin input[type=range] { width: 100%; accent-color: var(--a-green); }
+.admin input[type=file].plain { color: var(--a-dim); font: inherit; max-width: 100%; }
+
+.pv { border: 1px solid var(--a-line); background: #0a0e13; padding: 0.7rem; }
+.pv-head { display: flex; align-items: center; background: #ffffff; padding: 0.4rem 0.8rem; min-height: 3rem; }
+.pv-head.l { justify-content: flex-start; } .pv-head.c { justify-content: center; } .pv-head.r { justify-content: flex-end; }
+.pv-foot { display: flex; align-items: center; background: #141753; padding: 0.7rem 0.8rem; }
+.pv-foot.l { justify-content: flex-start; } .pv-foot.c { justify-content: center; } .pv-foot.r { justify-content: flex-end; }
+.pv-logo { width: auto; max-width: 100%; display: block; object-fit: contain; }
+.pv-foot.plate .pv-logo { background: #fff; padding: 0.4rem 0.7rem; border-radius: 0.7rem; box-sizing: content-box; }
+.pv-foot.white .pv-logo { filter: brightness(0) invert(1); }
+.pv-none { color: #94a3b8; font-size: 0.8rem; }
+.pv-slide { background: #141753; padding: 1.1rem; display: grid; place-items: center; }
+.pv-frame { position: relative; overflow: hidden; width: 100%; max-width: 320px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.25); }
+.pv-frame img { display: block; width: 100%; height: 100%; }
+.pv-frame.rounded { border-radius: 1.2rem; } .pv-frame.square { border-radius: 0.2rem; } .pv-frame.circle { border-radius: 50%; max-width: 240px; }
+.pv-frame.tilt { transform: rotate(1.5deg); } .pv-frame.circle.tilt { transform: none; }
+.pv-note { color: var(--a-dim); font-size: 0.76rem; margin-top: 0.35rem; }
+.seg { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.seg label { display: inline-flex; align-items: center; gap: 0.35rem; border: 1px solid var(--a-line); background: var(--a-panel-2); padding: 0.25rem 0.7rem; cursor: pointer; }
+.seg label:has(input:checked) { border-color: var(--a-green); background: #10241a; color: #fff; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label:has(input:focus-visible) { outline: 2px solid var(--a-blue); }

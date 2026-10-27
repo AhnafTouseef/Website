@@ -19,9 +19,11 @@ import threading
 import time
 import zipfile
 import zlib
+import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from email.utils import parsedate_to_datetime
 from importlib import metadata
 
 app = Flask(__name__)
@@ -701,33 +703,457 @@ def newest_courses(all_courses, limit):
     return sorted(all_courses, key=lambda c: (-c["added_ts"], -c["order"], c["title"].casefold()))[:limit]
 
 
-@app.context_processor
-def inject_random_logo():
-    """Inject a random logo filename from static/logo into all templates as `logo`.
+# ---------------------------------------------------------------------------
+# Time. The site runs on Bangladesh time (UTC+6, no daylight saving) and never trusts a
+# visitor's device clock: every "has it started yet?" decision is made here, on the server.
+#
+# The server asks an online time service every few minutes from a background thread (a page
+# request never waits for it) and remembers how far its own clock is from the real time. If a
+# service is down it tries the next one; if all are down it keeps the last known correction,
+# and with none at all it falls back to the server clock. The admin "system" page shows which.
+# ---------------------------------------------------------------------------
 
-    Falls back to a sensible name if the folder is missing or empty.
-    """
-    logos_dir = os.path.join(app.static_folder or 'static', 'logo')
+BD_TZ = timezone(timedelta(hours=6), "BST")
+TIME_SYNC_EVERY = 600            # seconds between successful checks
+TIME_RETRY_EVERY = 60            # seconds between attempts while no service could be reached
+TIME_STALE_AFTER = 3600          # a correction older than this is shown as "stale" in the admin
+TIME_HTTP_TIMEOUT = 6
+
+
+def _http_open(url, method="GET"):
+    request_ = urllib.request.Request(url, method=method, headers={"User-Agent": "belajar-site/1.0"})
+    return urllib.request.urlopen(request_, timeout=TIME_HTTP_TIMEOUT)
+
+
+def _time_from_timeapi():
+    with _http_open("https://timeapi.io/api/time/current/zone?timeZone=Asia%2FDhaka") as resp:
+        data = json.loads(resp.read(65536).decode("utf-8"))
+    local = datetime.strptime(str(data["dateTime"])[:19], "%Y-%m-%dT%H:%M:%S")
+    return local.replace(tzinfo=BD_TZ).astimezone(timezone.utc)
+
+
+def _time_from_worldtimeapi():
+    with _http_open("https://worldtimeapi.org/api/timezone/Asia/Dhaka") as resp:
+        data = json.loads(resp.read(65536).decode("utf-8"))
+    return datetime.fromtimestamp(int(data["unixtime"]), timezone.utc)
+
+
+def _time_from_http_date():
+    with _http_open("https://www.google.com/", "HEAD") as resp:
+        stamp = resp.headers["Date"]
+    return parsedate_to_datetime(stamp).astimezone(timezone.utc)
+
+
+# tried in this order; a test can replace the list
+TIME_PROVIDERS = [
+    ("timeapi.io", _time_from_timeapi),
+    ("worldtimeapi.org", _time_from_worldtimeapi),
+    ("HTTP Date header (google.com)", _time_from_http_date),
+]
+
+
+class _Clock:
+    """Real time = system clock + a correction learned from an online time service."""
+
+    def __init__(self):
+        self.offset = 0.0
+        self.source = None            # name of the service that gave the current correction
+        self.synced_at = None         # system time.time() of the last good check
+        self.last_try = None
+        self.errors = []              # [(service, message)] from the last failed round
+        self.fake = None              # tests only: a datetime or a function returning one
+        self._started = False
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+
+    def enabled(self):
+        return os.environ.get("TIME_SYNC", "on").strip().lower() not in ("off", "0", "false", "no")
+
+    def now(self):
+        """The current moment as an aware UTC datetime."""
+        fake = self.fake
+        if fake is not None:
+            return fake() if callable(fake) else fake
+        return datetime.fromtimestamp(time.time() + self.offset, timezone.utc)
+
+    def sync(self):
+        """Ask the services in order until one answers. Returns True when the correction was updated."""
+        self.last_try = time.time()
+        errors = []
+        for name, fetch in list(TIME_PROVIDERS):
+            started = time.time()
+            try:
+                moment = fetch()
+                finished = time.time()
+                if moment.tzinfo is None or moment.year < 2024:
+                    raise ValueError("implausible time %r" % (moment,))
+            except Exception as exc:                  # any network or parsing problem: try the next one
+                errors.append((name, str(exc) or exc.__class__.__name__))
+                continue
+            with self._lock:
+                self.offset = moment.timestamp() - (started + finished) / 2
+                self.source, self.synced_at, self.errors = name, finished, errors
+            return True
+        with self._lock:
+            self.errors = errors
+        log.warning("Time check failed on every service (%s); using the last known time",
+                    "; ".join(f"{n}: {m}" for n, m in errors))
+        return False
+
+    def _loop(self):
+        while not self._stop.is_set():
+            ok = self.sync()
+            self._stop.wait(TIME_SYNC_EVERY if ok else TIME_RETRY_EVERY)
+
+    def ensure_started(self):
+        if self._started or not self.enabled():
+            return
+        with self._lock:
+            if self._started:
+                return
+            self._started = True
+        threading.Thread(target=self._loop, name="time-sync", daemon=True).start()
+
+    def status(self):
+        with self._lock:
+            offset, source, synced_at, errors = self.offset, self.source, self.synced_at, list(self.errors)
+        if self.fake is not None:
+            state, note = "fake", "a fixed test time is in use"
+        elif not self.enabled():
+            state, note = "off", "online time check is switched off (TIME_SYNC=off); the server clock is used"
+        elif synced_at is None:
+            state, note = "waiting", "no online time service has answered yet; the server clock is used meanwhile"
+        elif time.time() - synced_at > TIME_STALE_AFTER:
+            state, note = "stale", "the last online check is old; its correction is still applied"
+        else:
+            state, note = "ok", "synced with an online time service"
+        return {"state": state, "note": note, "source": source, "offset": offset, "errors": errors,
+                "synced_at": synced_at, "last_try": self.last_try}
+
+
+TIME = _Clock()
+
+
+def now_bd():
+    """The current moment in Bangladesh time (aware datetime)."""
+    return TIME.now().astimezone(BD_TZ)
+
+
+@app.before_request
+def _start_clock():
+    TIME.ensure_started()
+
+
+# ---------------------------------------------------------------------------
+# Static file URLs that change when the file changes, so a replaced logo or image shows up at
+# once instead of the browser's cached copy.
+# ---------------------------------------------------------------------------
+
+def asset_url(filename):
+    url = url_for("static", filename=filename)
     try:
-        files = [f for f in os.listdir(logos_dir) if os.path.splitext(f)[1].lower() in ('.png', '.jpg', '.jpeg', '.svg', '.webp', '.gif')]
-    except Exception:
-        files = []
+        stamp = int(os.stat(os.path.join(app.static_folder, filename)).st_mtime)
+    except OSError:
+        return url
+    return f"{url}?v={stamp}"
 
-    if files:
-        chosen = random.choice(files)
+
+@app.after_request
+def _svg_headers(response):
+    """An SVG opened directly (not through <img>) must not be able to run anything."""
+    if request.path.lower().endswith(".svg"):
+        response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Webinars
+#
+#   static/webinars/<folder>/webinar.json   title, date, time, links, agenda, ...
+#   static/webinars/<folder>/cover.<ext>    optional picture (static/webinar.jpg when missing)
+#
+# A webinar only has a START time: nobody knows beforehand how long it will run. So
+#   upcoming  = before the start time (the join link is NOT shown yet)
+#   started   = the start time has passed (the join link is shown)
+# and it stays on the site until someone hides or deletes it in the admin console. Nothing is
+# removed automatically. A webinar without a date is listed last as "date to be announced".
+# ---------------------------------------------------------------------------
+
+WEBINAR_DEFAULT_COVER = "webinar.jpg"
+WEBINAR_KEYS = ["title", "subtitle", "description", "date", "time", "platform", "join_link", "rsvp_link",
+                "capacity", "agenda", "speakers", "courses", "published"]
+TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
+HERO_WEBINARS = 3                 # most webinar slides shown in the home slider (after the brand slide)
+
+
+def _webinars_dir():
+    return os.path.join(app.static_folder, "webinars")
+
+
+def _webinar_start(date_text, time_text):
+    """Aware Bangladesh datetime for a date ('YYYY-MM-DD') and time ('HH:MM'), else None."""
+    day = _valid_date(date_text)
+    if not day or not TIME_RE.match(time_text or ""):
+        return None
+    hour, minute = (int(part) for part in time_text.split(":"))
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=BD_TZ)
+
+
+def _clock12(moment):
+    return moment.strftime("%I:%M %p").lstrip("0")
+
+
+def _agenda(value):
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, str):
+            item = {"item": item}
+        if isinstance(item, dict) and _text(item.get("item")):
+            out.append({"time": _text(item.get("time")), "item": _text(item.get("item"))})
+    return out
+
+
+def _course_titles():
+    """{folder: title} of every published course (used to link webinars to courses)."""
+    titles = {}
+    for folder in _subfolders(_courses_dir()):
+        meta = _read_json_checked(os.path.join(_courses_dir(), folder, "meta.json"))[0]
+        if meta is not None and not _is_false(meta.get("published", True)):
+            titles[folder] = _text(meta.get("title")) or folder
+    return titles
+
+
+def _webinar_lookups():
+    everyone = load_instructors(include_hidden=True)
+    return {
+        "visible": _instructor_index([p for p in everyone if p["published"]]),
+        "hidden": _instructor_index([p for p in everyone if not p["published"]]),
+        "courses": _course_titles(),
+    }
+
+
+def _webinar_view(folder, data, path, now, lookups):
+    """One webinar as the templates see it. `data` is the parsed webinar.json (cleaned here)."""
+    date_text, time_text = _text(data.get("date")), _text(data.get("time"))
+    start = _webinar_start(date_text, time_text)
+    if start is None:
+        status, starts_in, started_for = "tba", None, None
+    elif now < start:
+        status, starts_in, started_for = "upcoming", int((start - now).total_seconds()) + 1, None
     else:
-        # sensible default; templates should handle missing file gracefully
-        chosen = ''
+        status, starts_in, started_for = "started", None, int((now - start).total_seconds())
 
-    return {'logo': chosen}
+    speakers = []
+    for name in _text_list(data.get("speakers")):
+        person = lookups["visible"].get(_norm(name))
+        if person is None and _norm(name) in lookups["hidden"]:
+            continue                                    # a hidden instructor is not shown anywhere public
+        speakers.append(person or {"slug": None, "name": name, "role": "", "photo": None})
+    linked = [{"slug": s, "title": lookups["courses"][s]} for s in _text_list(data.get("courses")) if s in lookups["courses"]]
+
+    cover = _find_image(path, "cover")
+    description = _text(data.get("description"))
+    title = _text(data.get("title")) or folder.replace("-", " ").replace("_", " ").title()
+    view = {
+        "slug": folder,
+        "title": title,
+        "subtitle": _text(data.get("subtitle")),
+        "description": description,
+        "paragraphs": _paragraphs(description),
+        "date": date_text if start else "",
+        "time": time_text if start else "",
+        "start": start,
+        "status": status,
+        "starts_in": starts_in,
+        "started_for": started_for,
+        "platform": _text(data.get("platform")),
+        "join_link": clean_url(data.get("join_link"))[0],
+        "rsvp_link": clean_url(data.get("rsvp_link"))[0],
+        "capacity": _text(data.get("capacity")),
+        "agenda": _agenda(data.get("agenda")),
+        "speakers": speakers,
+        "courses": linked,
+        "cover": f"webinars/{folder}/{cover}" if cover else WEBINAR_DEFAULT_COVER,
+        "has_cover": bool(cover),
+        "published": not _is_false(data.get("published", True)),
+    }
+    if start:
+        view.update({
+            "weekday": start.strftime("%A"), "day": str(start.day), "month": start.strftime("%B"),
+            "month_short": start.strftime("%b").upper(), "weekday_short": start.strftime("%a").upper(),
+            "year": str(start.year), "time_label": _clock12(start),
+            "date_label": f"{start.strftime('%A')}, {start.day} {start.strftime('%B %Y')}",
+        })
+        view["when_label"] = f"{view['date_label']} · {view['time_label']}"
+    else:
+        view.update({"weekday": "", "day": "", "month": "", "month_short": "TBA", "weekday_short": "",
+                     "year": "", "time_label": "", "date_label": "Date to be announced", "when_label": "Date to be announced"})
+    view["join_open"] = status == "started" and bool(view["join_link"])
+    return view
+
+
+def _webinar_order(view):
+    return (view["start"] is None, view["start"].timestamp() if view["start"] else 0, view["title"].casefold())
+
+
+def load_webinars(include_hidden=False):
+    """Published webinars, soonest first (dated ones, then the 'to be announced' ones)."""
+    root, now, lookups, found = _webinars_dir(), now_bd(), _webinar_lookups(), []
+    for folder in _subfolders(root):
+        path = os.path.join(root, folder)
+        data = _read_json(os.path.join(path, "webinar.json"))
+        if data is None:
+            continue
+        view = _webinar_view(folder, data, path, now, lookups)
+        if view["published"] or include_hidden:
+            found.append(view)
+    found.sort(key=_webinar_order)
+    return found
+
+
+def webinars_for_course(slug, webinars):
+    return [w for w in webinars if any(c["slug"] == slug for c in w["courses"])]
+
+
+# ---------------------------------------------------------------------------
+# Branding: logo files, the home slider's brand slide, and how they are aligned and scaled.
+#
+#   static/logo/branding.json          the settings (written by the admin "branding" page)
+#   static/logo/<file>                 header / footer logos (png, jpg, webp, gif or svg)
+#   static/images/brand-slide.<ext>    the brand slide picture (static/webinar.jpg until one is uploaded)
+# ---------------------------------------------------------------------------
+
+BRAND_FILE = "branding.json"
+LOGO_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg")
+SLIDE_RATIOS = {"3/2": "3 / 2", "4/3": "4 / 3", "16/9": "16 / 9", "1/1": "1 / 1", "4/5": "4 / 5"}
+BRAND_ALIGN = ("left", "center", "right")
+FOOTER_STYLES = ("plain", "plate", "white")
+SLIDE_FITS = ("cover", "contain")
+SLIDE_SHAPES = ("rounded", "square", "circle")
+BRAND_DEFAULTS = {
+    "header": {"logo": "", "height": 64, "height_mobile": 48, "align": "left"},
+    "footer": {"logo": "", "height": 64, "height_mobile": 48, "align": "left", "style": "plain"},
+    "slide": {
+        "fit": "cover", "x": 50, "y": 50, "zoom": 100, "shape": "rounded", "ratio": "3/2", "side": "right", "tilt": True,
+        "badge": "First Cohort · Python Programming",
+        "headline": "Learn Skills That Actually Matter",
+        "highlight": "Actually",
+        "text": ("We're two recent graduates who believe practical skills shouldn't cost a fortune or take years to acquire. "
+                 "Join a cohort that teaches real-world Python for students ready to build projects and launch faster."),
+        "primary_label": "Explore the Course",
+        "secondary_label": "Meet your instructors",
+    },
+}
+BRAND_LIMITS = {"height": (16, 160), "height_mobile": (12, 120), "x": (0, 100), "y": (0, 100), "zoom": (100, 300)}
+
+
+def _logo_dir():
+    return os.path.join(app.static_folder, "logo")
+
+
+def _images_dir():
+    return os.path.join(app.static_folder, "images")
+
+
+def _logo_files():
+    try:
+        names = sorted(os.listdir(_logo_dir()))
+    except OSError:
+        return []
+    return [n for n in names if os.path.splitext(n)[1].lower() in LOGO_EXTS and not n.startswith(".")
+            and os.path.isfile(os.path.join(_logo_dir(), n))]
+
+
+def _clamp(value, key, default):
+    low, high = BRAND_LIMITS[key]
+    try:
+        return max(low, min(high, int(float(value))))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _choice(value, options, default):
+    return value if value in options else default
+
+
+def clean_branding(raw):
+    """Settings as stored/used: unknown keys dropped, numbers clamped, choices checked."""
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for part in ("header", "footer"):
+        src, dflt = raw.get(part), BRAND_DEFAULTS[part]
+        src = src if isinstance(src, dict) else {}
+        out[part] = {
+            "logo": os.path.basename(_text(src.get("logo"))),
+            "height": _clamp(src.get("height", dflt["height"]), "height", dflt["height"]),
+            "height_mobile": _clamp(src.get("height_mobile", dflt["height_mobile"]), "height_mobile", dflt["height_mobile"]),
+            "align": _choice(src.get("align"), BRAND_ALIGN, dflt["align"]),
+        }
+    footer_src = raw.get("footer") if isinstance(raw.get("footer"), dict) else {}
+    out["footer"]["style"] = _choice(footer_src.get("style"), FOOTER_STYLES, "plain")
+    src = raw.get("slide") if isinstance(raw.get("slide"), dict) else {}
+    dflt = BRAND_DEFAULTS["slide"]
+    slide = {
+        "fit": _choice(src.get("fit"), SLIDE_FITS, dflt["fit"]),
+        "x": _clamp(src.get("x", dflt["x"]), "x", dflt["x"]),
+        "y": _clamp(src.get("y", dflt["y"]), "y", dflt["y"]),
+        "zoom": _clamp(src.get("zoom", dflt["zoom"]), "zoom", dflt["zoom"]),
+        "shape": _choice(src.get("shape"), SLIDE_SHAPES, dflt["shape"]),
+        "ratio": _choice(src.get("ratio"), SLIDE_RATIOS, dflt["ratio"]),
+        "side": _choice(src.get("side"), ("left", "right"), dflt["side"]),
+        "tilt": dflt["tilt"] if "tilt" not in src else not _is_false(src.get("tilt")),
+    }
+    for key in ("badge", "headline", "highlight", "text", "primary_label", "secondary_label"):
+        slide[key] = _text(src.get(key)) if key in src else dflt[key]
+    slide["headline"] = slide["headline"] or dflt["headline"]          # the slide always needs a headline
+    out["slide"] = slide
+    return out
+
+
+def read_branding():
+    """The saved settings (cleaned); defaults when the file does not exist yet."""
+    path = os.path.join(_logo_dir(), BRAND_FILE)
+    data = _read_json(path) if os.path.isfile(path) else None
+    return clean_branding(data)
+
+
+def _headline_parts(headline, highlight):
+    if highlight and headline.count(highlight) >= 1:
+        before, _, after = headline.partition(highlight)
+        return before, highlight, after
+    return headline, "", ""
+
+
+def load_branding():
+    """Settings plus everything the templates need: resolved logo files and image URLs."""
+    brand = read_branding()
+    files = _logo_files()
+    header_file = brand["header"]["logo"] if brand["header"]["logo"] in files else (random.choice(files) if files else None)
+    footer_file = brand["footer"]["logo"] if brand["footer"]["logo"] in files else header_file
+    brand["header"].update(file=header_file, url=asset_url("logo/" + header_file) if header_file else None)
+    brand["footer"].update(file=footer_file, url=asset_url("logo/" + footer_file) if footer_file else None)
+    slide = brand["slide"]
+    own = _find_image(_images_dir(), "brand-slide")
+    image = f"images/{own}" if own else (WEBINAR_DEFAULT_COVER if os.path.isfile(os.path.join(app.static_folder, WEBINAR_DEFAULT_COVER)) else None)
+    slide.update(image=image, image_url=asset_url(image) if image else None, custom_image=bool(own),
+                 css_ratio=SLIDE_RATIOS[slide["ratio"]], headline_parts=_headline_parts(slide["headline"], slide["highlight"]))
+    return brand
+
+
+@app.context_processor
+def site_context():
+    return {"brand": load_branding(), "asset": asset_url}
 
 
 @app.route("/")
 def home():
+    webinars = [w for w in load_webinars() if w["start"]][:HERO_WEBINARS]
     return render_template(
         "home.html",
         featured_courses=newest_courses(load_courses(), 2),
         pipeline_courses=pipeline_courses,
+        hero_webinars=webinars,
         show_banner=True
     )
 
@@ -753,7 +1179,8 @@ def course_details(slug):
         course = next((c for c in all_courses if c["slug"] == slug), None)
         if course is None:
             abort(404)
-    return render_template("course_details.html", course=course)
+    linked = webinars_for_course(course["slug"], load_webinars())
+    return render_template("course_details.html", course=course, linked_webinar=(linked[0] if linked else None))
 
 @app.route("/instructor/<slug>")
 def instructor_profile(slug):
@@ -764,19 +1191,10 @@ def instructor_profile(slug):
     taught = [c for c in load_courses() if any(i.get("slug") == slug for i in c["instructors"])]
     return render_template("instructor.html", person=person, courses=assign_tints(taught))
 
-@app.route("/webinar", methods=["GET", "POST"])
+@app.route("/webinar")
 def webinar():
-    if request.method == "POST":
-        name = request.form.get("full_name", "").strip()
-        email = request.form.get("email", "").strip()
-        university = request.form.get("university", "").strip()
-        major = request.form.get("major", "").strip()
-        if not name or not email:
-            flash("Please provide your name and email to reserve your spot.", "error")
-        else:
-            flash(f"Thanks, {name}! Your webinar seat is reserved. Check {email} for the Zoom link.", "success")
-        return redirect(url_for("webinar"))
-    return render_template("webinar.html")
+    items = load_webinars()
+    return render_template("webinar.html", featured=(items[0] if items else None), later=items[1:])
 
 @app.route("/about")
 def about():
@@ -1236,11 +1654,16 @@ def _trash_items():
         if not m or name.startswith(".") or not os.path.isdir(path):
             continue
         slug = m.group("slug")
-        kind = "instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX) else "course"
+        kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
+                else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
         if kind == "instructor":
             slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
             meta, _ = _read_json_checked(os.path.join(path, "profile.json"))
             title = _text((meta or {}).get("name"))
+        elif kind == "webinar":
+            slug = slug[len(TRASH_WEBINAR_PREFIX):]
+            meta, _ = _read_json_checked(os.path.join(path, "webinar.json"))
+            title = _text((meta or {}).get("title"))
         else:
             meta, _ = _read_json_checked(os.path.join(path, "meta.json"))
             title = _text((meta or {}).get("title"))
@@ -1763,11 +2186,7 @@ def system():
             return metadata.version(pkg)
         except metadata.PackageNotFoundError:
             return "?"
-    logos_dir = os.path.join(app.static_folder, "logo")
-    try:
-        logos = sorted(f for f in os.listdir(logos_dir) if os.path.splitext(f)[1].lower() in IMAGE_EXTS)
-    except OSError:
-        logos = []
+    logos = _logo_files()
     routes = sorted(
         ({"rule": r.rule, "methods": ", ".join(sorted(r.methods - {"HEAD", "OPTIONS"})), "endpoint": r.endpoint}
          for r in app.url_map.iter_rules() if r.endpoint != "static"),
@@ -1784,15 +2203,18 @@ def system():
         "Static folder": app.static_folder,
         "Courses folder": _courses_dir(),
         "Instructors folder": _instructors_dir(),
+        "Webinars folder": _webinars_dir(),
         "Trash folder": _trash_dir(),
         "Admin URL prefix": ADMIN_PREFIX,
         "Password source": {"env": "ADMIN_PASSWORD env var", "file": "admin_password.txt"}.get(_pw_source, "admin_password.txt (created this run)"),
         "Upload limit": "5 MB per image / 8 MB per request",
         "Session idle timeout": f"{ADMIN_IDLE_SECONDS // 3600} h",
         "Login lockout": f"{_LOGIN_MAX_FAILS} failures = {_LOGIN_LOCK_SECONDS // 60} min",
-        "Server time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Server clock": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Site time (Bangladesh)": now_bd().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    return render_template("admin_system.html", info=info, routes=routes, logos=logos,
+    return render_template("admin_system.html", info=info, routes=routes, logos=logos, clock=TIME.status(),
+                           brand_logo=load_branding()["header"]["file"],
                            logs=_logbook.recent(), instructors=load_instructors(include_hidden=True),
                            pipeline_count=len(pipeline_courses), faq_count=len(faq_questions))
 
@@ -2006,16 +2428,28 @@ def course_delete(slug):
 def trash_restore(name):
     src = _trash_path(name)
     slug = TRASH_RE.match(name).group("slug")
-    is_person = slug.startswith(TRASH_INSTRUCTOR_PREFIX)
-    root = _instructors_dir() if is_person else _courses_dir()
-    if is_person:
+    kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
+            else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
+    root = {"instructor": _instructors_dir, "webinar": _webinars_dir, "course": _courses_dir}[kind]()
+    if kind == "instructor":
         slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
+    elif kind == "webinar":
+        slug = slug[len(TRASH_WEBINAR_PREFIX):]
     target = slug if not os.path.exists(os.path.join(root, slug)) else _unique_slug(slug + "-restored", root)
     os.makedirs(root, exist_ok=True)
     shutil.move(src, os.path.join(root, target))
+    if kind == "webinar":
+        # a restored webinar comes back as a hidden draft: its date has most likely passed, so set it right before publishing
+        path = os.path.join(root, target, "webinar.json")
+        data, _ = _read_json_checked(path)
+        if data is not None:
+            data["published"] = False
+            _atomic_write(path, _dump_webinar(data))
     log.info("admin: restored '%s' as '%s'", name, target)
-    flash(f"Restored as '{target}'." + ("" if target == slug else " The original name was taken."), "success")
-    return redirect(url_for("admin.instructor_edit" if is_person else "admin.course_edit", slug=target))
+    flash(f"Restored as '{target}'." + ("" if target == slug else " The original name was taken.")
+          + (" It is a hidden draft: check the date, then publish it." if kind == "webinar" else ""), "success")
+    endpoint = {"instructor": "admin.instructor_edit", "webinar": "admin.webinar_edit", "course": "admin.course_edit"}[kind]
+    return redirect(url_for(endpoint, slug=target))
 
 
 @admin_bp.post("/trash/<name>/purge")
@@ -2486,6 +2920,447 @@ def instructor_toggle(slug):
         log.info("admin: instructor '%s' is now %s", slug, "published" if now_published else "hidden")
         flash(f"'{slug}' is now {'published' if now_published else 'hidden'}.", "success")
     return redirect(url_for("admin.instructors_list"))
+
+
+# ---------------------------------------------------------------------------
+# Admin: webinars
+#
+# A webinar only has a start time (nobody knows how long it will run), so nothing here is
+# automatic: the join link opens when the start time arrives, and the webinar stays on the
+# public site until you hide it or move it to the trash.
+# ---------------------------------------------------------------------------
+
+TRASH_WEBINAR_PREFIX = "webinar--"          # course slugs never contain "--", so the kinds cannot clash
+WEBINAR_LIMITS = {"title": 120, "subtitle": 160, "description": 6000, "platform": 60, "capacity": 80, "item": 200, "time": 30}
+
+
+def _webinar_path(slug):
+    """Absolute path of an existing webinar folder, or 404 (same guards as _course_path)."""
+    root = _webinars_dir()
+    if (not slug or slug in (".", "..") or slug.startswith((".", "_"))
+            or slug != os.path.basename(slug) or "\\" in slug or "\x00" in slug):
+        abort(404)
+    path = os.path.join(root, slug)
+    if not os.path.isdir(path) or os.path.dirname(os.path.realpath(path)) != os.path.realpath(root):
+        abort(404)
+    return path
+
+
+def _dump_webinar(data):
+    ordered = {k: data[k] for k in WEBINAR_KEYS if k in data}
+    ordered.update({k: v for k, v in data.items() if k not in ordered})      # keep hand-added keys
+    return json.dumps(ordered, indent=4, ensure_ascii=False) + "\n"
+
+
+def _span_label(seconds):
+    seconds = max(0, int(seconds))
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            n = seconds // size
+            return f"{n} {unit}{'' if n == 1 else 's'}"
+    return "less than a minute"
+
+
+def scan_webinars():
+    """Every webinar folder (hidden and broken ones too) with diagnostics for the list page."""
+    root, now, lookups, entries = _webinars_dir(), now_bd(), _webinar_lookups(), []
+    for folder in _subfolders(root):
+        path = os.path.join(root, folder)
+        data, err = _read_json_checked(os.path.join(path, "webinar.json"))
+        issues = []
+        if err:
+            issues.append({"level": "error", "text": f"webinar.json: {err}; this folder is ignored by the public site"})
+            entries.append({"slug": folder, "status": "broken", "title": folder, "state": "", "when": "", "note": "",
+                            "join": False, "rsvp": False, "courses": [], "cover": False, "issues": issues,
+                            "n_error": 1, "n_warn": 0})
+            continue
+        view = _webinar_view(folder, data, path, now, lookups)
+        unknown = [k for k in data if k not in WEBINAR_KEYS]
+        if unknown:
+            issues.append({"level": "info", "text": "unknown key(s) ignored by the site: " + ", ".join(f"'{k}'" for k in unknown)})
+        if (_text(data.get("date")) or _text(data.get("time"))) and view["start"] is None:
+            issues.append({"level": "warn", "text": "date or time is not valid (use YYYY-MM-DD and HH:MM), so it is shown as 'date to be announced'"})
+        if _text(data.get("join_link")) and not view["join_link"]:
+            issues.append({"level": "warn", "text": "join link is not a web address, so it is not shown"})
+        if _text(data.get("rsvp_link")) and not view["rsvp_link"]:
+            issues.append({"level": "warn", "text": "registration link is not a web address, so it is not shown"})
+        missing = [s for s in _text_list(data.get("courses")) if s not in lookups["courses"]]
+        if missing:
+            issues.append({"level": "warn", "text": "linked course(s) not found or hidden: " + ", ".join(missing)})
+        if view["status"] == "started" and not view["join_link"]:
+            issues.append({"level": "warn", "text": "it has started but there is no join link yet"})
+        if view["status"] == "started":
+            issues.append({"level": "info", "text": "the start time has passed; it stays on the site until you hide or delete it"})
+        note = ""
+        if view["status"] == "upcoming":
+            note = "starts in " + _span_label(view["starts_in"])
+        elif view["status"] == "started":
+            note = "started " + _span_label(view["started_for"]) + " ago"
+        entries.append({
+            "slug": folder, "status": "published" if view["published"] else "hidden", "title": view["title"],
+            "state": view["status"], "when": view["when_label"], "note": note,
+            "join": bool(view["join_link"]), "rsvp": bool(view["rsvp_link"]),
+            "courses": [c["title"] for c in view["courses"]], "cover": view["has_cover"], "issues": issues,
+            "n_error": sum(1 for i in issues if i["level"] == "error"),
+            "n_warn": sum(1 for i in issues if i["level"] == "warn"),
+            "_order": _webinar_order(view),
+        })
+    entries.sort(key=lambda e: e.get("_order", (True, 0, e["title"].casefold())))
+    return entries
+
+
+def _webinar_form_from_data(data, slug):
+    agenda = _raw_rows(data.get("agenda"), ["time", "item"])
+    return {
+        "slug": slug or "",
+        "title": _text(data.get("title")), "subtitle": _text(data.get("subtitle")),
+        "description": _text(data.get("description")),
+        "date": _text(data.get("date")), "time": _text(data.get("time")),
+        "platform": _text(data.get("platform")), "join_link": _text(data.get("join_link")),
+        "rsvp_link": _text(data.get("rsvp_link")), "capacity": _text(data.get("capacity")),
+        "agenda": agenda,
+        "speakers": _text_list(data.get("speakers")), "courses": _text_list(data.get("courses")),
+        "published": not _is_false(data.get("published", True)) if data else False,
+    }
+
+
+def _read_webinar_submission(creating, existing):
+    """(form, result, errors). result is None when something is wrong; the form is then shown again."""
+    f, errors = request.form, []
+    form = {
+        "slug": f.get("slug", "").strip().lower() if creating else "",
+        **{k: f.get(k, "").strip() for k in ("title", "subtitle", "description", "date", "time", "platform",
+                                              "join_link", "rsvp_link", "capacity")},
+        "agenda": [{"time": r["time"], "item": r["item"]} for r in _form_rows("agenda", ["time", "item"])],
+        "speakers": [s.strip() for s in f.getlist("speakers") if s.strip()],
+        "courses": [s.strip() for s in f.getlist("courses") if s.strip()],
+        "published": f.get("published") == "on",
+    }
+    if creating:
+        problem = _slug_error(form["slug"])
+        if problem:
+            errors.append(problem)
+        elif os.path.exists(os.path.join(_webinars_dir(), form["slug"])):
+            errors.append(f"A webinar folder named '{form['slug']}' already exists.")
+    if not form["title"]:
+        errors.append("Title is required.")
+    for key, limit in WEBINAR_LIMITS.items():
+        if key in form and len(form[key]) > limit:
+            errors.append(f"{key.replace('_', ' ').capitalize()} is too long (max {limit} characters).")
+    if form["date"] and not _valid_date(form["date"]):
+        errors.append("Date is not valid.")
+    if form["time"] and not TIME_RE.match(form["time"]):
+        errors.append("Time is not valid (use HH:MM, e.g. 10:00).")
+    if form["date"] and not form["time"]:
+        errors.append("Add the start time too: the join link opens at that moment. Leave both empty for 'date to be announced'.")
+    if form["time"] and not form["date"]:
+        errors.append("Add the date too, or clear the time.")
+    for key, label in (("join_link", "Join link"), ("rsvp_link", "Registration link")):
+        cleaned, why = clean_url(form[key])
+        if why:
+            errors.append(f"{label} {why}.")
+        elif cleaned:
+            form[key] = cleaned
+    if any(len(r["item"]) > WEBINAR_LIMITS["item"] or len(r["time"]) > WEBINAR_LIMITS["time"] for r in form["agenda"]):
+        errors.append("An agenda line is too long.")
+    if any(r["time"] and not r["item"] for r in form["agenda"]):
+        errors.append("Every agenda line with a time also needs text.")
+    known_courses = set(_subfolders(_courses_dir()))
+    form["courses"] = [s for s in dict.fromkeys(form["courses"]) if s in known_courses]
+    form["speakers"] = list(dict.fromkeys(form["speakers"]))
+
+    cover = None
+    ext, data, why = _read_upload("cover")
+    if why:
+        errors.append("Cover picture: " + why)
+    elif data:
+        cover = (ext, data)
+    if errors:
+        return form, None, errors
+
+    out = {k: v for k, v in (existing or {}).items() if k not in WEBINAR_KEYS}      # keep hand-added keys
+    out["title"] = form["title"]
+    for key in ("subtitle", "description", "date", "time", "platform", "join_link", "rsvp_link", "capacity"):
+        if form[key]:
+            out[key] = form[key]
+    if form["agenda"]:
+        out["agenda"] = [{"time": r["time"], "item": r["item"]} for r in form["agenda"] if r["item"]]
+    if form["speakers"]:
+        out["speakers"] = form["speakers"]
+    if form["courses"]:
+        out["courses"] = form["courses"]
+    out["published"] = form["published"]
+    return form, {"data": out, "slug": form["slug"], "cover": cover, "remove_cover": f.get("remove_cover") == "on"}, []
+
+
+def _webinar_editor(slug):
+    creating = slug is None
+    path = None if creating else _webinar_path(slug)
+    existing, load_error = {}, None
+    if not creating:
+        existing, load_error = _read_json_checked(os.path.join(path, "webinar.json"))
+        if load_error == "file not found":
+            existing, load_error = {}, None
+        existing = existing or {}
+    errors, status = [], 200
+    if request.method == "POST":
+        form, result, errors = _read_webinar_submission(creating, existing)
+        if result is not None:
+            target = result["slug"] if creating else slug
+            target_path = os.path.join(_webinars_dir(), target)
+            os.makedirs(target_path, exist_ok=True)
+            _atomic_write(os.path.join(target_path, "webinar.json"), _dump_webinar(result["data"]))
+            if result["cover"]:
+                ext, data = result["cover"]
+                _atomic_write(os.path.join(target_path, "cover" + ext), data)
+                _remove_thumbnails(target_path, keep="cover" + ext, stem="cover")
+            elif result["remove_cover"]:
+                _remove_thumbnails(target_path, stem="cover")
+            log.info("admin: %s webinar '%s'", "created" if creating else "saved", target)
+            if creating:
+                flash(f"Created '{target}'" + ("" if result["data"]["published"] else " as a draft. Tick 'published' when it is ready") + ".", "success")
+            else:
+                flash(f"Saved '{target}'. The public site already shows the new version.", "success")
+            return redirect(url_for("admin.webinar_edit", slug=target))
+        status = 400
+    else:
+        form = _webinar_form_from_data(existing, slug)
+        if creating:
+            form["published"] = False
+    lookups = _webinar_lookups()
+    view = _webinar_view(slug, existing, path, now_bd(), lookups) if not creating else None
+    people = [p["name"] for p in load_instructors(include_hidden=True)]
+    speaker_options = people + [n for n in form["speakers"] if n not in people]
+    course_options = [{"slug": s, "title": _text((_read_json_checked(os.path.join(_courses_dir(), s, "meta.json"))[0] or {}).get("title")) or s}
+                      for s in _subfolders(_courses_dir())]
+    cover = _find_image(path, "cover") if path else None
+    return render_template(
+        "admin_webinar_edit.html",
+        creating=creating, slug=slug, form=form, errors=errors, load_error=load_error, view=view,
+        cover=(f"webinars/{slug}/{cover}" if cover else None), default_cover=WEBINAR_DEFAULT_COVER,
+        speaker_options=speaker_options, course_options=course_options,
+        state_note=(_state_note(view) if view else ""),
+        now_label=now_bd().strftime("%A, %d %B %Y, %I:%M %p").replace(" 0", " "),
+    ), status
+
+
+def _state_note(view):
+    if view["status"] == "upcoming":
+        return "Starts in " + _span_label(view["starts_in"]) + ". The join link stays hidden until then."
+    if view["status"] == "started":
+        return "Started " + _span_label(view["started_for"]) + " ago. It stays on the site until you hide or delete it."
+    return "No date yet, so it is listed last as 'date to be announced'."
+
+
+@admin_bp.route("/webinars")
+def webinars_list():
+    entries = scan_webinars()
+    stats = {
+        "total": len(entries),
+        "upcoming": sum(1 for e in entries if e["status"] == "published" and e["state"] == "upcoming"),
+        "started": sum(1 for e in entries if e["status"] == "published" and e["state"] == "started"),
+        "hidden": sum(1 for e in entries if e["status"] == "hidden"),
+        "broken": sum(1 for e in entries if e["status"] == "broken"),
+    }
+    return render_template("admin_webinars.html", webinars=entries, stats=stats, clock=TIME.status(),
+                           now_label=now_bd().strftime("%A, %d %B %Y, %I:%M %p").replace(" 0", " "))
+
+
+@admin_bp.route("/webinar/new", methods=["GET", "POST"])
+def webinar_new():
+    return _webinar_editor(None)
+
+
+@admin_bp.route("/webinar/<slug>", methods=["GET", "POST"])
+def webinar_edit(slug):
+    return _webinar_editor(slug)
+
+
+@admin_bp.post("/webinar/<slug>/delete")
+def webinar_delete(slug):
+    path = _webinar_path(slug)
+    os.makedirs(_trash_dir(), exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = f"{TRASH_WEBINAR_PREFIX}{slug}__{stamp}"
+    dest, n = os.path.join(_trash_dir(), base), 1
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(_trash_dir(), f"{base}-{n}")
+    shutil.move(path, dest)
+    log.info("admin: moved webinar '%s' to trash", slug)
+    flash(f"Moved '{slug}' to trash. You can restore it from the Trash page.", "success")
+    return redirect(url_for("admin.webinars_list"))
+
+
+@admin_bp.post("/webinar/<slug>/toggle")
+def webinar_toggle(slug):
+    path = _webinar_path(slug)
+    data, err = _read_json_checked(os.path.join(path, "webinar.json"))
+    if data is None:
+        flash(f"Cannot change '{slug}': webinar.json {err}. Open it in the editor to repair it.", "error")
+    else:
+        now_published = _is_false(data.get("published", True))
+        data["published"] = now_published
+        _atomic_write(os.path.join(path, "webinar.json"), _dump_webinar(data))
+        log.info("admin: webinar '%s' is now %s", slug, "published" if now_published else "hidden")
+        flash(f"'{slug}' is now {'published' if now_published else 'hidden'}.", "success")
+    return redirect(url_for("admin.webinars_list"))
+
+
+# ---------------------------------------------------------------------------
+# Admin: branding (logos, the home slider's brand slide)
+# ---------------------------------------------------------------------------
+
+SVG_LIMIT = 1024 * 1024
+SVG_BLOCKED = {"script", "foreignobject", "iframe", "object", "embed", "link", "animate", "animatemotion",
+               "animatetransform", "set", "handler", "listener", "audio", "video", "canvas", "meta", "base"}
+_SVG_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?!#)", re.IGNORECASE)
+_SVG_DATA_RE = re.compile(r"^data:image/(?:png|jpe?g|gif|webp);base64,", re.IGNORECASE)
+
+
+def check_svg(data):
+    """(data, error). A logo SVG is accepted only when it cannot run code or load anything from elsewhere."""
+    if len(data) > SVG_LIMIT:
+        return None, "the SVG is larger than 1 MB."
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None, "the SVG must be saved as UTF-8 text."
+    low = text.lower()
+    if "<!doctype" in low or "<!entity" in low or "<?xml-stylesheet" in low:
+        return None, "the SVG contains a DOCTYPE, entity or external stylesheet, which is not allowed."
+    try:
+        root = ET.fromstring(text)
+    except Exception as exc:
+        return None, f"this is not a valid SVG file ({exc})."
+    if _local(root.tag).lower() != "svg":
+        return None, "this is not an SVG file."
+    if not (root.get("viewBox") or (root.get("width") and root.get("height"))):
+        return None, "the SVG needs a viewBox (or a width and height) so it can be scaled. Re-export it from your design tool."
+    for el in root.iter():
+        if not isinstance(el.tag, str):
+            continue
+        name = _local(el.tag).lower()
+        if name in SVG_BLOCKED:
+            return None, f"the SVG uses <{name}>, which is not allowed (it could run code or load other files)."
+        if name == "style" and el.text and (re.search(r"@import|javascript:|expression\(", el.text, re.IGNORECASE) or _SVG_URL_RE.search(el.text)):
+            return None, "the SVG's style block loads something from outside, which is not allowed."
+        for attr, value in el.attrib.items():
+            key, val = _local(attr).lower(), value.strip()
+            if key.startswith("on"):
+                return None, "the SVG contains event handlers (onclick, onload …), which are not allowed."
+            if key == "href" and not (val.startswith("#") or _SVG_DATA_RE.match(val)):
+                return None, "the SVG links to something outside itself, which is not allowed."
+            if "javascript:" in val.lower() or "@import" in val.lower() or _SVG_URL_RE.search(val):
+                return None, "the SVG loads something from outside itself, which is not allowed."
+    return data, None
+
+
+def _read_upload(field, allow_svg=False):
+    """(extension, bytes, error) for an optional image upload; (None, None, None) when nothing was chosen."""
+    file = request.files.get(field)
+    if not file or not file.filename:
+        return None, None, None
+    data = file.read(UPLOAD_LIMIT + 1)
+    if len(data) > UPLOAD_LIMIT:
+        return None, None, f"that file is larger than {UPLOAD_LIMIT // (1024 * 1024)} MB."
+    ext = _sniff_image(data)
+    if ext:
+        return ext, data, None
+    if allow_svg and b"<svg" in data[:4096].lower():
+        clean, why = check_svg(data)
+        return (".svg", clean, None) if clean else (None, None, why)
+    return None, None, "use a " + ("PNG, JPG, WEBP, GIF or SVG" if allow_svg else "JPG, PNG, WEBP or GIF") + " image."
+
+
+def _brand_number(form, errors, key, label):
+    raw = form.get(key, "").strip()
+    try:
+        return int(float(raw))
+    except ValueError:
+        errors.append(f"{label} must be a number.")
+        return None
+
+
+def _read_branding_submission():
+    """(settings, uploads, errors). `uploads` maps 'header'/'footer'/'slide' to (ext, bytes)."""
+    f, errors = request.form, []
+    files = _logo_files()
+    settings = {"header": {}, "footer": {}, "slide": {}}
+    for part in ("header", "footer"):
+        label = part.capitalize()
+        box = settings[part]
+        choice = os.path.basename(f.get(f"{part}_logo", "").strip())
+        box["logo"] = choice if choice in files else ""
+        box["height"] = _brand_number(f, errors, f"{part}_height", f"{label} logo height")
+        box["height_mobile"] = _brand_number(f, errors, f"{part}_height_mobile", f"{label} logo height on phones")
+        box["align"] = f.get(f"{part}_align", "")
+        if box["align"] not in BRAND_ALIGN:
+            errors.append(f"{label} logo alignment is not valid.")
+    settings["footer"]["style"] = f.get("footer_style", "")
+    if settings["footer"]["style"] not in FOOTER_STYLES:
+        errors.append("Footer logo style is not valid.")
+    slide = settings["slide"]
+    for key, label in (("x", "Horizontal focus"), ("y", "Vertical focus"), ("zoom", "Zoom")):
+        slide[key] = _brand_number(f, errors, f"slide_{key}", label)
+    slide["fit"], slide["shape"], slide["ratio"], slide["side"] = (f.get("slide_fit", ""), f.get("slide_shape", ""),
+                                                                 f.get("slide_ratio", ""), f.get("slide_side", ""))
+    for key, options, label in (("fit", SLIDE_FITS, "Picture fit"), ("shape", SLIDE_SHAPES, "Picture shape"),
+                                ("ratio", SLIDE_RATIOS, "Picture frame"), ("side", ("left", "right"), "Picture side")):
+        if slide[key] not in options:
+            errors.append(f"{label} is not valid.")
+    slide["tilt"] = f.get("slide_tilt") == "on"
+    for key, limit in (("badge", 80), ("headline", 120), ("highlight", 60), ("text", 600), ("primary_label", 40), ("secondary_label", 40)):
+        slide[key] = f.get(f"slide_{key}", "").strip()
+        if len(slide[key]) > limit:
+            errors.append(f"Slide {key.replace('_', ' ')} is too long (max {limit} characters).")
+    if slide["highlight"] and slide["highlight"] not in slide["headline"]:
+        errors.append("The highlighted word must appear in the headline.")
+
+    uploads = {}
+    for part, field, svg in (("header", "header_file", True), ("footer", "footer_file", True), ("slide", "slide_image", False)):
+        ext, data, why = _read_upload(field, allow_svg=svg)
+        if why:
+            errors.append({"header": "Header logo", "footer": "Footer logo", "slide": "Slide picture"}[part] + ": " + why)
+        elif data:
+            uploads[part] = (ext, data)
+    return settings, uploads, errors
+
+
+@admin_bp.route("/branding", methods=["GET", "POST"])
+def branding():
+    errors, status = [], 200
+    current = read_branding()
+    if request.method == "POST":
+        settings, uploads, errors = _read_branding_submission()
+        if not errors:
+            os.makedirs(_logo_dir(), exist_ok=True)
+            os.makedirs(_images_dir(), exist_ok=True)
+            for part in ("header", "footer"):
+                if part in uploads:
+                    ext, data = uploads[part]
+                    _atomic_write(os.path.join(_logo_dir(), part + ext), data)
+                    _remove_thumbnails(_logo_dir(), keep=part + ext, stem=part)
+                    settings[part]["logo"] = part + ext
+            if "slide" in uploads:
+                ext, data = uploads["slide"]
+                _atomic_write(os.path.join(_images_dir(), "brand-slide" + ext), data)
+                _remove_thumbnails(_images_dir(), keep="brand-slide" + ext, stem="brand-slide")
+            elif request.form.get("remove_slide_image") == "on":
+                _remove_thumbnails(_images_dir(), stem="brand-slide")
+            cleaned = clean_branding(settings)
+            _atomic_write(os.path.join(_logo_dir(), BRAND_FILE), json.dumps(cleaned, indent=4, ensure_ascii=False) + "\n")
+            log.info("admin: saved branding")
+            flash("Saved. The public site already shows the new logos and slide.", "success")
+            return redirect(url_for("admin.branding"))
+        status = 400
+        current = clean_branding(settings)
+    live = load_branding()
+    return render_template(
+        "admin_branding.html", form=current, errors=errors, files=_logo_files(), live=live,
+        ratios=list(SLIDE_RATIOS), limits=BRAND_LIMITS,
+        custom_slide=live["slide"]["custom_image"], slide_image_url=live["slide"]["image_url"],
+    ), status
 
 
 app.register_blueprint(admin_bp)

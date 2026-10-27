@@ -21,7 +21,7 @@ Home page: the **2 newest** courses appear as compact side-by-side cards; with o
 
 ## Adding content (no code changes needed)
 
-Courses and instructors are read from folders on every page load, so just add or edit files and refresh the browser.
+Courses, instructors and webinars are read from folders on every page load, so just add or edit files and refresh the browser.
 
 ### Add a course: `static/course/<course-folder>/`
 
@@ -137,8 +137,10 @@ What it does:
 | courses | every folder in `static/course/` incl. hidden and broken ones; stats, health warnings, raw `meta.json` / `curriculum.csv`, file list; edit, publish/hide, duplicate, delete |
 | + new / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; live `meta.json` preview; Ctrl+S to save |
 | instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
-| trash | deleted courses and instructors are moved to `_trash/` (outside `static/`), restorable or deletable forever |
-| system | versions, paths, registered routes, instructors/logos found, recent log |
+| webinars | add, edit, hide and delete live sessions (see below) |
+| branding | logo, hero picture and hero text (see below) |
+| trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `static/`), restorable or deletable forever |
+| system | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
 
 ### Instructors section
 
@@ -147,6 +149,48 @@ What it does:
 - New instructors start as drafts (hidden) until you tick **published**.
 - Renaming an instructor updates every course that lists the old name. Deleting moves the folder to `_trash/` (restorable); courses that still list the name show it as plain text.
 - Uploads are checked by content: photos must be real JPG/PNG/WEBP/GIF (max 5 MB), the CV a real PDF (max 5 MB). Everything you enter is public, so add only what you want shown.
+
+### Webinars section
+
+A webinar lives in `static/webinars/<folder>/webinar.json` (plus an optional `cover.jpg/png/webp/gif`; without one, `static/webinar.jpg` is used). You can create zero, one or many, from the admin or by hand.
+
+| Key | Meaning |
+|---|---|
+| `title` (required), `subtitle`, `description` | text; blank lines in the description make paragraphs |
+| `date` (`YYYY-MM-DD`), `time` (`HH:MM`, 24 h) | the **start** time, always **Bangladesh time (UTC+6)** |
+| `platform`, `capacity` | shown as facts; capacity is text only, nothing is enforced |
+| `join_link` | revealed on the page at the start time (never present in the page before that) |
+| `rsvp_link` | optional "let us know you're coming" link. Anyone can join without it; it is only a headcount |
+| `agenda` | list of `{time, item}` |
+| `speakers` | instructor names (linked to their profile pages) |
+| `courses` | course folder names; a course page shows a "Webinar: ..." link to its soonest linked webinar |
+| `published` | `false` hides it everywhere |
+
+How it behaves:
+
+- A webinar only has a start time (nobody knows how long it will run), so there is no "ended" state. It shows **upcoming** until the start time, then **started** with the join link. It stays on the page **until you hide or delete it** in the admin; nothing is removed automatically. There are no recordings and no past list.
+- `/webinar` shows the soonest webinar with full details, then every later one as a single full-width notice line ("More details" opens the rest). With none planned it says so.
+- The home hero is a slider: the brand slide first, then up to 3 webinar slides. With no webinar it is just the brand slide. It autoplays, and pauses on hover, keyboard focus and when the tab is hidden; no autoplay when the visitor prefers reduced motion.
+- A legacy `webinar_link` in a course's `meta.json` still wins over the linked webinar.
+- Restoring a webinar from the trash brings it back as a draft (hidden) until you tick **published**.
+
+#### Time
+
+The site never trusts the visitor's device clock. The server keeps its own clock corrected from an online time service (tried in order: timeapi.io, worldtimeapi.org, the `Date` header of google.com), re-checked every 10 minutes, retried every minute after a failure. If no service is reachable it keeps the last correction, or uses the server's own clock. The join link reveals itself by the page reloading once, at the moment the server says the webinar starts.
+
+- The **system** page shows the clock status (ok / stale / waiting / off) and the current Bangladesh time.
+- Set `TIME_SYNC=off` to skip the online check (e.g. offline development, tests).
+- Keep the server's own clock reasonably right too (NTP is on by default on most hosts); it is the fallback.
+
+### Branding section
+
+Logo, hero picture and hero text are managed here, not in code. Settings are saved in `static/logo/branding.json`; if it is missing or damaged the defaults are used.
+
+- **Header logo** and **footer logo**: upload a PNG, JPG, WEBP, GIF or **SVG** (max 5 MB). Set the height (desktop and phone separately) and the alignment (left / center / right). The footer logo can also be shown plain, on a soft plate or on white (useful for dark logos), or left empty to reuse the header logo. Files are saved as `static/logo/header.<ext>` and `static/logo/footer.<ext>`; your own files in that folder are never touched. With no setting at all, the old behaviour (a logo picked from `static/logo/`) still applies.
+- **Hero picture** (`static/images/brand-slide.<ext>`, default `static/webinar.jpg`): fit (cover/contain), focus point (x / y), zoom (100 to 300%), shape (rounded / square / circle), ratio (3:2, 4:3, 16:9, 1:1, 4:5), side (left/right) and tilt. Every control has a live preview next to it.
+- **Hero text**: badge, headline (with one highlighted word), paragraph and the two button labels. A blank headline falls back to the default.
+- Replaced images show up immediately (their URLs carry a version stamp, so browsers never keep the old one).
+- **SVG rules** (an SVG can carry code, so it is checked before saving): UTF-8 only, max 1 MB, must be a real `<svg>` with a `viewBox` (or width and height). Scripts, `foreignObject`, animation, `on...` handlers, external references, DOCTYPE/ENTITY and CSS `@import` / external `url()` are refused with the reason shown. Images embedded as `data:` (PNG/JPG/GIF/WEBP) are fine. SVGs are also served with a locked-down security header.
 
 Safety notes:
 
