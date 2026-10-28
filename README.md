@@ -169,7 +169,7 @@ A webinar lives in `static/webinars/<folder>/webinar.json` (plus an optional `co
 How it behaves:
 
 - A webinar only has a start time (nobody knows how long it will run), so there is no "ended" state. It shows **upcoming** until the start time, then **started** with the join link. It stays on the page **until you hide or delete it** in the admin; nothing is removed automatically. There are no recordings and no past list.
-- `/webinar` shows the soonest webinar with full details, then every later one as a single full-width notice line ("More details" opens the rest). With none planned it says so.
+- `/webinar` shows the soonest webinar with full details, then every later one as a single full-width notice line ("More details" opens the rest). Later lines carry no join or RSVP links; when one becomes the soonest it moves to the top and gets them. With none planned it says so.
 - The home hero is a slider: the brand slide first, then up to 3 webinar slides. With no webinar it is just the brand slide. It autoplays, and pauses on hover, keyboard focus and when the tab is hidden; no autoplay when the visitor prefers reduced motion.
 - A legacy `webinar_link` in a course's `meta.json` still wins over the linked webinar.
 - Restoring a webinar from the trash brings it back as a draft (hidden) until you tick **published**.

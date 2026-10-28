@@ -2,33 +2,41 @@
 {% block title %}Webinars{% endblock %}
 
 {# The join button, or a note about when it appears. A webinar only has a start time, so the join link is shown from
-   that moment on; the server decides, never the visitor's clock. #}
+   that moment on; the server decides, never the visitor's clock. Used for the featured (soonest) webinar only. #}
 {% macro join_block(w) %}
     {% if w.status == 'started' %}
         {% if w.join_link %}
-        <a class="button button-primary" href="{{ w.join_link }}" target="_blank" rel="noopener">Join the webinar →</a>
+        <a class="button button-primary wb-join" href="{{ w.join_link }}" target="_blank" rel="noopener">Join the webinar <span aria-hidden="true">→</span></a>
         {% else %}
         <span class="wb-note">This webinar has started. The join link will be added here shortly.</span>
         {% endif %}
     {% elif w.status == 'upcoming' %}
-        <span class="wb-note" data-starts-in="{{ w.starts_in }}">🔒 The join link appears here at {{ w.time_label }} (Bangladesh time), when the webinar starts.</span>
+        <span class="wb-note" data-starts-in="{{ w.starts_in }}"><span aria-hidden="true">🔒</span> The join link appears here at {{ w.time_label }} (Bangladesh time), when the webinar starts.</span>
     {% else %}
         <span class="wb-note">The join link appears here when the webinar starts.</span>
     {% endif %}
+{% endmacro %}
+
+{# The optional "we're coming" headcount link. #}
+{% macro rsvp(w) %}
     {% if w.rsvp_link %}
-    <a class="button button-secondary" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">Let us know you're coming</a>
+    <a class="wb-rsvp" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">
+        <span class="wb-rsvp-ic" aria-hidden="true">👋</span>
+        <span class="wb-rsvp-tx"><b>Let us know you're coming</b><small>Optional · anyone can join</small></span>
+        <span class="wb-rsvp-ar" aria-hidden="true">→</span>
+    </a>
     {% endif %}
 {% endmacro %}
 
-{# Everything below the headline: description, agenda, speakers, linked courses. #}
-{% macro extras(w) %}
+{# Description, agenda, speakers, linked courses. #}
+{% macro body(w) %}
     {% if w.paragraphs %}<div class="wb-desc">{% for p in w.paragraphs %}<p>{{ p }}</p>{% endfor %}</div>{% endif %}
     {% if w.agenda %}
     <div class="wb-block">
         <h4>What we'll cover</h4>
-        <div class="timeline-list">
-            {% for a in w.agenda %}<div>{% if a.time %}<span>{{ a.time }}</span> {% endif %}{{ a.item }}</div>{% endfor %}
-        </div>
+        <ol class="wb-timeline">
+            {% for a in w.agenda %}<li>{% if a.time %}<span class="wb-tl-time">{{ a.time }}</span>{% endif %}<span class="wb-tl-item">{{ a.item }}</span></li>{% endfor %}
+        </ol>
     </div>
     {% endif %}
     {% if w.speakers %}
@@ -53,12 +61,42 @@
 {% endmacro %}
 
 {% block content %}
-<section class="hero hero-dark wb-head">
+<section class="hero hero-dark wb-head{{ ' has-stage' if featured }}">
     <div class="container">
         <span class="pill-tag">Live webinars</span>
         <h1>Meet us live</h1>
         <p>Short live sessions where you can see how we teach and ask your questions. Anyone can join; you do not need to sign up to get in.</p>
     </div>
+
+    {# ---- the soonest webinar, with everything ---- #}
+    {% if featured %}
+    {% set w = featured %}
+    <div class="container wb-stage">
+        <div class="wb-stage-label"><span class="wb-chip {{ w.status }}">{{ {'upcoming': 'Next webinar', 'started': 'Happening now', 'tba': 'Date to be announced'}[w.status] }}</span></div>
+        <article class="wb-feature" id="{{ w.slug }}">
+            <header class="wb-feature-head">
+                <h2>{{ w.title }}</h2>
+                {% if w.subtitle %}<p class="wb-sub">{{ w.subtitle }}</p>{% endif %}
+            </header>
+            <div class="wb-feature-main">{{ body(w) }}</div>
+            <aside class="wb-feature-side">
+                <div class="wb-cover-wrap">
+                    <div class="wb-cover"><img src="{{ asset(w.cover) }}" alt=""></div>
+                    {% if w.start %}<div class="hs-date" aria-hidden="true"><span>{{ w.month_short }}</span><b>{{ w.day }}</b><span>{{ w.weekday_short }}</span></div>{% endif %}
+                </div>
+                <div class="wb-panel">
+                    <ul class="wb-facts">
+                        {% if w.start %}<li><span class="wb-fi" aria-hidden="true">📅</span><span><small>Date</small>{{ w.date_label }}</span></li>{% endif %}
+                        {% if w.time_label %}<li><span class="wb-fi" aria-hidden="true">⏰</span><span><small>Starts · Bangladesh time</small>{{ w.time_label }}</span></li>{% endif %}
+                        {% if w.platform %}<li><span class="wb-fi" aria-hidden="true">📹</span><span><small>Where</small>{{ w.platform }}</span></li>{% endif %}
+                        {% if w.capacity %}<li><span class="wb-fi" aria-hidden="true">👥</span><span><small>Seats</small>{{ w.capacity }}</span></li>{% endif %}
+                    </ul>
+                    <div class="wb-actions">{{ join_block(w) }}{{ rsvp(w) }}</div>
+                </div>
+            </aside>
+        </article>
+    </div>
+    {% endif %}
 </section>
 
 {% if not featured %}
@@ -70,34 +108,9 @@
         <a class="button button-primary" href="{{ url_for('courses') }}">Browse the courses →</a>
     </div>
 </section>
-{% else %}
+{% elif later %}
+{# ---- the rest, one full-width notice line each. No join links here: when one becomes the soonest it moves to the top. ---- #}
 <section class="container wb-wrap">
-
-    {# ---- the soonest webinar, with everything ---- #}
-    {% set w = featured %}
-    <article class="wb-feature" id="{{ w.slug }}">
-        <div class="wb-feature-main">
-            <span class="wb-chip {{ w.status }}">{{ {'upcoming': 'Next webinar', 'started': 'Happening now', 'tba': 'Date to be announced'}[w.status] }}</span>
-            <h2>{{ w.title }}</h2>
-            {% if w.subtitle %}<p class="wb-sub">{{ w.subtitle }}</p>{% endif %}
-            <ul class="wb-facts">
-                {% if w.start %}<li><span aria-hidden="true">📅</span> {{ w.date_label }}</li>{% endif %}
-                {% if w.time_label %}<li><span aria-hidden="true">⏰</span> {{ w.time_label }} · Bangladesh time</li>{% endif %}
-                {% if w.platform %}<li><span aria-hidden="true">📹</span> {{ w.platform }}</li>{% endif %}
-                {% if w.capacity %}<li><span aria-hidden="true">👥</span> {{ w.capacity }}</li>{% endif %}
-            </ul>
-            <div class="wb-actions">{{ join_block(w) }}</div>
-            {% if w.rsvp_link %}<p class="wb-fine">Letting us know is optional. It only helps us plan; anyone can join.</p>{% endif %}
-            {{ extras(w) }}
-        </div>
-        <div class="wb-feature-media">
-            <div class="wb-cover"><img src="{{ asset(w.cover) }}" alt=""></div>
-            {% if w.start %}<div class="hs-date" aria-hidden="true"><span>{{ w.month_short }}</span><b>{{ w.day }}</b><span>{{ w.weekday_short }}</span></div>{% endif %}
-        </div>
-    </article>
-
-    {# ---- the rest, one full-width line each ---- #}
-    {% if later %}
     <h3 class="wb-later-title">Also coming up</h3>
     <div class="wb-rows">
         {% for w in later %}
@@ -113,15 +126,13 @@
                 {% if w.paragraphs or w.agenda or w.speakers or w.courses %}
                 <details class="wb-more">
                     <summary>More details</summary>
-                    {{ extras(w) }}
+                    {{ body(w) }}
                 </details>
                 {% endif %}
             </div>
-            <div class="wb-row-actions">{{ join_block(w) }}</div>
         </article>
         {% endfor %}
     </div>
-    {% endif %}
 </section>
 {% endif %}
 {% endblock %}
