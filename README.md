@@ -19,6 +19,10 @@ Every course thumbnail is shown in a fixed **16:9** frame and cropped to fill it
 
 Home page: the **2 newest** courses appear as compact side-by-side cards; with only 1 course it becomes a single card spanning the whole section. The Courses page gives each card a stable, random-looking pastel background (picked from the course folder name, from the palette `CARD_TINTS` in `app.py`).
 
+## Desktop scale
+
+On screens 1024px and wider, everything below the banner and the nav bar is shown at 80% (like 80% browser zoom: text, images, spacing). To change it, edit `--site-zoom` in the last block of `static/css/main.css` (`0.8` now; `1` turns it off). Phones and tablets are not affected. The admin console has its own stylesheet and is not scaled.
+
 ## Adding content (no code changes needed)
 
 Courses, instructors and webinars are read from folders on every page load, so just add or edit files and refresh the browser.

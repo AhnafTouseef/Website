@@ -15,6 +15,8 @@
     --border: #e5e7eb;
     --shadow: 0 18px 70px rgba(20, 23, 83, 0.12);
     --radius-lg: 1.5rem;
+    /* desktop scale of everything below the nav bar; the real value is set in the desktop block at the end of this file */
+    --site-zoom: 1;
 }
 
 html {
@@ -804,7 +806,7 @@ h2 {
 
 .pricing-sidebar {
     position: sticky;
-    top: 1.5rem;
+    top: calc(1.5rem / var(--site-zoom));
     align-self: start;
 }
 
@@ -1765,7 +1767,7 @@ a.team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(20
 }
 .wb-feature-head { grid-area: head; }
 .wb-feature-main { grid-area: main; min-width: 0; }
-.wb-feature-side { grid-area: side; align-self: start; position: sticky; top: 5.5rem; display: grid; gap: 1rem; }
+.wb-feature-side { grid-area: side; align-self: start; position: sticky; top: calc(5.5rem / var(--site-zoom)); display: grid; gap: 1rem; }
 .wb-feature h2 { margin: 0; font-size: clamp(1.6rem, 2.8vw, 2.2rem); line-height: 1.12; color: #ffffff; }
 .wb-feature .wb-sub { color: #fcd34d; font-size: 1.28rem; }
 
@@ -1901,4 +1903,20 @@ a.team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(20
     .wb-feature-main .wb-desc { margin-top: 0; }
     .wb-row { grid-template-columns: 4.2rem minmax(0, 1fr); gap: 1rem; padding: 1rem; }
     .wb-stamp { width: 4.2rem; height: 4.2rem; }
+}
+
+/* =====================================================================
+   Desktop scale. Everything except the banner and the nav bar is shown at
+   --site-zoom (0.8 = like 80% browser zoom: text, images, spacing, all of it).
+   Change the one number below to make it bigger or smaller; 1 turns it off.
+   Phones and tablets (under 1024px) are not touched.
+   ===================================================================== */
+@media (min-width: 1024px) {
+    :root { --site-zoom: 0.8; }
+    .page-content,
+    .site-footer { zoom: var(--site-zoom); }
+    /* the content keeps the width the nav bar has (1140px on screen), so the edges line up */
+    .page-content .container,
+    .flash-group,
+    .site-footer .container { width: min(calc(1140px / var(--site-zoom)), calc(100% - 2rem)); }
 }
