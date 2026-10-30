@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>trash</h1>
-    <span class="sub">{{ items|length }} deleted item(s) (courses, instructors and webinars) · stored in _trash/ next to app.py, not reachable from the website</span>
+    <span class="sub">{{ items|length }} deleted item(s) (courses, instructors, webinars and files) · stored in _trash/ next to app.py, not reachable from the website</span>
     {% if items %}
     <div class="right">
         <form class="inline" method="post" action="{{ url_for('admin.trash_empty') }}" data-confirm="Permanently delete ALL {{ items|length }} item(s) in the trash? This cannot be undone.">
@@ -24,7 +24,7 @@
         {% for i in items %}
             <tr class="row">
                 <td class="cell-title">{{ i.title }}</td>
-                <td><span class="chip {{ {'instructor': 'hidden', 'webinar': 'draft', 'course': 'published'}[i.kind] }}">{{ i.kind }}</span></td>
+                <td><span class="chip {{ {'instructor': 'hidden', 'webinar': 'draft', 'course': 'published', 'file': 'tba'}[i.kind] }}">{{ i.kind }}</span></td>
                 <td class="dim mono-sm">{{ i.name }}</td>
                 <td class="mono-sm nowrap">{{ i.deleted|fmt_ts }} <span class="dim">({{ i.deleted|ago }})</span></td>
                 <td class="num">{{ i.files }}</td>

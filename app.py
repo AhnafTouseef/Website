@@ -1,22 +1,26 @@
 from flask import (Flask, Blueprint, render_template, request, redirect, url_for,
-                   flash, abort, session, jsonify, Response)
+                   flash, abort, session, jsonify, Response, send_file)
 from markupsafe import Markup, escape
 import csv
 import difflib
+import functools
 import hmac
 import io
 import json
 import logging
+import mimetypes
 import os
 import platform
 import random
 import re
 import secrets
 import shutil
+import stat
 import sys
 import tempfile
 import threading
 import time
+import unicodedata
 import zipfile
 import zlib
 import urllib.request
@@ -864,6 +868,8 @@ def _svg_headers(response):
     if request.path.lower().endswith(".svg"):
         response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
         response.headers["X-Content-Type-Options"] = "nosniff"
+    elif request.path.startswith("/static/"):
+        response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 
@@ -1239,6 +1245,18 @@ META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published"
 
 ADMIN_IDLE_SECONDS = 8 * 3600
 UPLOAD_LIMIT = 5 * 1024 * 1024
+
+
+def _env_mb(name, default):
+    try:
+        return max(1, int(float(os.environ.get(name, default)))) * 1024 * 1024
+    except ValueError:
+        return default * 1024 * 1024
+
+
+BIG_UPLOAD_LIMIT = _env_mb("MAX_UPLOAD_MB", 300)     # one request to the file browser or one import bundle (env MAX_UPLOAD_MB)
+UNZIP_MAX_TOTAL = _env_mb("MAX_UNZIP_MB", 1000)      # everything a zip may unpack to, or a download-zip may hold (env MAX_UNZIP_MB)
+BIG_ENDPOINTS = {"admin.files_upload", "admin.transfer_import_upload"}
 _LOGIN_MAX_FAILS = 5
 _LOGIN_LOCK_SECONDS = 300
 _login_state = {}
@@ -1346,8 +1364,10 @@ def _safe_next(target):
 
 @admin_bp.before_request
 def _admin_guard():
+    big = request.endpoint in BIG_ENDPOINTS
     if request.method == "POST":
-        sent = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+        # a large upload never has its body parsed just to look for the token: that comes in a header
+        sent = request.headers.get("X-CSRF-Token", "") if big else (request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", ""))
         expected = session.get("csrf", "")
         if not expected or not hmac.compare_digest(sent.encode(), expected.encode()):
             abort(400, "CSRF check failed. Reload the page and try again.")
@@ -1356,6 +1376,11 @@ def _admin_guard():
     if not _admin_session_valid():
         target = request.full_path.rstrip("?") if request.method == "GET" else None
         return redirect(url_for("admin.login", next=target))
+    if big and request.method == "POST":
+        try:
+            request.max_content_length = BIG_UPLOAD_LIMIT      # Flask 3.1+; older versions keep the normal 12 MB cap
+        except AttributeError:
+            pass
     return None
 
 
@@ -1363,7 +1388,7 @@ def _admin_guard():
 def _admin_headers(response):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
-    response.headers["X-Frame-Options"] = "DENY"
+    response.headers.setdefault("X-Frame-Options", "DENY")       # the file preview sets SAMEORIGIN itself
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
@@ -1655,8 +1680,13 @@ def _trash_items():
             continue
         slug = m.group("slug")
         kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
-                else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
-        if kind == "instructor":
+                else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX)
+                else "file" if slug.startswith(TRASH_FILE_PREFIX) else "course")
+        if kind == "file":
+            origin, _ = _read_json_checked(os.path.join(path, "origin.json"))
+            title = "static/" + _text((origin or {}).get("path"))
+            slug = _text((origin or {}).get("path"))
+        elif kind == "instructor":
             slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
             meta, _ = _read_json_checked(os.path.join(path, "profile.json"))
             title = _text((meta or {}).get("name"))
@@ -2428,6 +2458,19 @@ def course_delete(slug):
 def trash_restore(name):
     src = _trash_path(name)
     slug = TRASH_RE.match(name).group("slug")
+    if slug.startswith(TRASH_FILE_PREFIX):
+        origin, _ = _read_json_checked(os.path.join(src, "origin.json"))
+        try:
+            parts = _fb_parts((origin or {}).get("path"), allow_empty=False)
+            target = _fb_abs(parts)
+        except FBError as exc:
+            flash(f"Cannot restore: {exc.message}", "error")
+            return redirect(url_for("admin.trash"))
+        _fb_restore(os.path.join(src, "payload"), target)
+        shutil.rmtree(src, ignore_errors=True)
+        log.info("admin: restored '/%s' from the trash", "/".join(parts))
+        flash(f"Restored static/{'/'.join(parts)}." , "success")
+        return redirect(url_for("admin.files", path="/".join(parts[:-1])))
     kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
             else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
     root = {"instructor": _instructors_dir, "webinar": _webinars_dir, "course": _courses_dir}[kind]()
@@ -3361,6 +3404,1202 @@ def branding():
         ratios=list(SLIDE_RATIOS), limits=BRAND_LIMITS,
         custom_slide=live["slide"]["custom_image"], slide_image_url=live["slide"]["image_url"],
     ), status
+
+
+# ===========================================================================
+# Admin: file browser and content transfer (export / import)
+#
+# The file browser works inside static/ only. Code (static/css) and everything outside
+# static/ (app.py, templates, the password and key files) cannot be reached from it.
+# Deleting moves things to _trash/ (restorable); nothing here deletes for good.
+# ===========================================================================
+
+FB_HIDDEN_TOP = {"css", "js"}                                   # code, not content
+FB_ROLE_ROOTS = {"course": ("course", "admin.course_edit"),
+                 "instructors": ("instructor", "admin.instructor_edit"),
+                 "webinars": ("webinar", "admin.webinar_edit")}
+FB_PROTECTED = {("course",), ("instructors",), ("webinars",), ("images",), ("logo",)}
+FB_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"}
+FB_DOC_EXTS = {".pdf", ".txt", ".md", ".csv", ".json", ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt", ".odt", ".ods", ".odp"}
+FB_MEDIA_EXTS = {".mp4", ".webm", ".mov", ".mp3", ".m4a", ".ogg", ".wav"}
+FB_ARCHIVE_EXTS = {".zip"}
+FB_ALLOWED_EXTS = FB_IMAGE_EXTS | FB_DOC_EXTS | FB_MEDIA_EXTS | FB_ARCHIVE_EXTS
+FB_TEXT_EXTS = {".json", ".csv", ".txt", ".md"}
+FB_EDIT_LIMIT = 512 * 1024
+FB_MAX_NAME = 120
+FB_MAX_DEPTH = 12
+FB_SEARCH_LIMIT = 300
+UNZIP_MAX_ENTRIES = 10000
+TRASH_FILE_PREFIX = "file--"
+_FB_NAME_BAD = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
+_FB_RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+
+
+class FBError(Exception):
+    def __init__(self, message, status=400, extra=None):
+        super().__init__(message)
+        self.message, self.status, self.extra = message, status, extra or {}
+
+
+def _fb_api(fn):
+    """JSON endpoint wrapper: FBError and OSError become a JSON error the page can show."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            out = fn(*args, **kwargs)
+        except FBError as exc:
+            return jsonify({"ok": False, "error": exc.message, **exc.extra}), exc.status
+        except OSError as exc:
+            log.warning("file browser: %s", exc)
+            return jsonify({"ok": False, "error": f"The server could not do that ({exc.strerror or exc.__class__.__name__})."}), 500
+        return jsonify(out)
+    return wrapper
+
+
+def _fb_body():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+# ---------- names and paths ----------
+
+def _fb_clean_name(name):
+    """Make any file name safe to store (used for uploaded and unzipped names, which are not trusted)."""
+    name = unicodedata.normalize("NFC", name or "")
+    name = _FB_NAME_BAD.sub("_", name)
+    name = re.sub(r"\s+", " ", name).strip().strip(".").strip()
+    if len(name) > FB_MAX_NAME:
+        stem, ext = os.path.splitext(name)
+        name = stem[:max(1, FB_MAX_NAME - len(ext))] + ext
+    if name.split(".")[0].lower() in _FB_RESERVED:
+        name = "_" + name
+    return name
+
+
+def _fb_check_name(name):
+    """A name typed by the admin: refused when wrong, never silently changed."""
+    name = unicodedata.normalize("NFC", (name or "")).strip()
+    if not name:
+        raise FBError("Type a name.")
+    if name.startswith("."):
+        raise FBError("A name cannot start with a dot.")
+    if _FB_NAME_BAD.search(name):
+        raise FBError('A name cannot contain  / \\ : * ? " < > |')
+    if name.endswith("."):
+        raise FBError("A name cannot end with a dot.")
+    if len(name) > FB_MAX_NAME:
+        raise FBError(f"That name is longer than {FB_MAX_NAME} characters.")
+    if name.split(".")[0].lower() in _FB_RESERVED:
+        raise FBError(f"'{name}' is a reserved name on Windows; pick another.")
+    return name
+
+
+def _fb_parts(rel, allow_empty=True):
+    """Clean list of path segments for a path relative to static/. Anything unsafe is refused."""
+    rel = (rel or "").strip()
+    if "\\" in rel or "\x00" in rel:
+        raise FBError("Invalid path.")
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if len(parts) > FB_MAX_DEPTH:
+        raise FBError("That path is too deep.")
+    for p in parts:
+        if p == ".." or p.startswith(".") or _FB_NAME_BAD.search(p) or len(p) > FB_MAX_NAME:
+            raise FBError("Invalid path.")
+    if parts and parts[0] in FB_HIDDEN_TOP:
+        raise FBError("That folder is not available here.", 403)
+    if not parts and not allow_empty:
+        raise FBError("Choose a file or folder first.")
+    return parts
+
+
+def _fb_abs(parts, must_exist=False):
+    """Absolute path for clean segments. A symbolic link anywhere on the way is refused."""
+    root = os.path.realpath(app.static_folder)
+    path = os.path.join(root, *parts) if parts else root
+    if os.path.realpath(path) != os.path.normpath(path):
+        raise FBError("Invalid path.", 403)
+    if must_exist and not os.path.exists(path):
+        raise FBError("That file or folder does not exist (anymore). Refresh the list.", 404)
+    return path
+
+
+def _fb_dir(parts):
+    path = _fb_abs(parts, must_exist=True)
+    if not os.path.isdir(path):
+        raise FBError("That is not a folder.", 400)
+    return path
+
+
+def _fb_slot_error(full, is_dir):
+    """Why something may not live at this path: inside course/, instructors/ and webinars/ every folder is one course,
+    person or webinar, so it needs a proper folder name, and loose files do not belong directly there."""
+    if len(full) >= 2 and full[0] in FB_ROLE_ROOTS:
+        if len(full) == 2 and not is_dir:
+            return f"files go inside a {FB_ROLE_ROOTS[full[0]][0]} folder, not directly in '{full[0]}'"
+        err = _slug_error(full[1])
+        if err:
+            return err
+    return None
+
+
+def _fb_ext(name):
+    return os.path.splitext(name)[1].lower()
+
+
+def _fb_kind(ext):
+    if ext in FB_IMAGE_EXTS:
+        return "image"
+    if ext == ".pdf":
+        return "pdf"
+    if ext in FB_ARCHIVE_EXTS:
+        return "archive"
+    if ext in {".mp4", ".webm", ".mov"}:
+        return "video"
+    if ext in {".mp3", ".m4a", ".ogg", ".wav"}:
+        return "audio"
+    if ext in FB_TEXT_EXTS:
+        return "text"
+    return "doc"
+
+
+def _fb_verify(ext, head):
+    """None when the first bytes fit the extension, else a short reason. A file name is never trusted."""
+    if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+        want = {".jpeg": ".jpg"}.get(ext, ext)
+        return None if _sniff_image(head) == want else f"it is not a real {ext[1:].upper()} image"
+    if ext == ".pdf":
+        return None if head.lstrip()[:5] == b"%PDF-" else "it is not a real PDF"
+    if ext == ".ico":
+        return None if head[:4] == b"\x00\x00\x01\x00" else "it is not a real icon file"
+    if ext in {".zip", ".xlsx", ".docx", ".pptx", ".odt", ".ods", ".odp"}:
+        return None if head[:2] == b"PK" else "it is not a real zip-based file"
+    if ext in {".xls", ".doc", ".ppt"}:
+        return None if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" else "it is not a real Office file"
+    return None
+
+
+def _fb_unique(path, is_dir=False):
+    folder, name = os.path.split(path)
+    stem, ext = (name, "") if is_dir else os.path.splitext(name)
+    n = 1
+    while True:
+        cand = os.path.join(folder, f"{stem} ({n}){ext}")
+        if not os.path.exists(cand):
+            return cand
+        n += 1
+
+
+def _fb_visible(entry):
+    name = entry.name
+    return not name.startswith(".") and not _FB_NAME_BAD.search(name) and not entry.is_symlink()
+
+
+def _fb_entry(parent, entry):
+    """Description of one file or folder for the page."""
+    st = entry.stat()
+    is_dir = entry.is_dir()
+    parts = parent + [entry.name]
+    rel = "/".join(parts)
+    out = {"name": entry.name, "path": rel, "dir": is_dir, "mtime": int(st.st_mtime)}
+    if is_dir:
+        out["kind"] = "folder"
+        out["size"] = 0
+        try:
+            out["count"] = sum(1 for e in os.scandir(entry.path) if _fb_visible(e))
+        except OSError:
+            out["count"] = 0
+        if len(parts) == 2 and parts[0] in FB_ROLE_ROOTS:
+            role, endpoint = FB_ROLE_ROOTS[parts[0]]
+            out["role"] = role
+            out["edit"] = url_for(endpoint, slug=entry.name)
+    else:
+        ext = _fb_ext(entry.name)
+        out["ext"] = ext
+        out["kind"] = _fb_kind(ext)
+        out["size"] = st.st_size
+        out["url"] = url_for("static", filename=rel)
+        out["text"] = ext in FB_TEXT_EXTS and st.st_size <= FB_EDIT_LIMIT
+        out["allowed"] = ext in FB_ALLOWED_EXTS
+    return out
+
+
+# ---------- trash ----------
+
+def _fb_trash(parts, force=False):
+    """Move one file or folder to _trash/ together with a note of where it came from."""
+    if not parts:
+        raise FBError("Choose a file or folder first.")
+    if not force and tuple(parts) in FB_PROTECTED:
+        raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be deleted.")
+    src = _fb_abs(parts, must_exist=True)
+    root = _trash_dir()
+    os.makedirs(root, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(root, f"{TRASH_FILE_PREFIX}{secrets.token_hex(4)}__{stamp}")
+    os.makedirs(dest)
+    try:
+        _atomic_write(os.path.join(dest, "origin.json"), json.dumps({"path": "/".join(parts), "dir": os.path.isdir(src)}))
+        shutil.move(src, os.path.join(dest, "payload"))
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+    return dest
+
+
+def _fb_restore(payload, target):
+    """Put a trashed item back. A folder that exists again is merged into; a clashing file is kept next to the old one."""
+    if not os.path.exists(target):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.move(payload, target)
+    elif os.path.isdir(payload) and os.path.isdir(target):
+        for name in sorted(os.listdir(payload)):
+            _fb_restore(os.path.join(payload, name), os.path.join(target, name))
+        try:
+            os.rmdir(payload)
+        except OSError:
+            pass
+    else:
+        shutil.move(payload, _fb_unique(target, os.path.isdir(payload)))
+
+
+# ---------- copy / move ----------
+
+def _fb_place(src, dst, move, policy, st):
+    """Put src at dst. Folders merge into a folder of the same name; policy decides what happens to a clashing file."""
+    if os.path.islink(src):
+        return
+    if os.path.isdir(src):
+        if os.path.exists(dst) and not os.path.isdir(dst):
+            st["skipped"] += 1
+            return
+        os.makedirs(dst, exist_ok=True)
+        for name in sorted(os.listdir(src)):
+            if not name.startswith(".tmp-"):
+                _fb_place(os.path.join(src, name), os.path.join(dst, name), move, policy, st)
+        if move:
+            try:
+                os.rmdir(src)
+            except OSError:
+                pass
+        return
+    if os.path.exists(dst):
+        if os.path.isdir(dst) or policy == "skip":
+            st["skipped"] += 1
+            return
+        if policy == "rename":
+            dst = _fb_unique(dst)
+            st["renamed"] += 1
+        else:
+            st["replaced"] += 1
+    if move:
+        try:
+            os.replace(src, dst)
+        except OSError:
+            shutil.move(src, dst)
+    else:
+        tmp = os.path.join(os.path.dirname(dst), ".tmp-" + secrets.token_hex(4))
+        try:
+            shutil.copy2(src, tmp)
+            os.replace(tmp, dst)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    st["done"] += 1
+
+
+def _fb_bulk(move):
+    body = _fb_body()
+    raw = body.get("paths")
+    if not isinstance(raw, list) or not raw:
+        raise FBError("Choose at least one file or folder.")
+    dest_parts = _fb_parts(body.get("dest"))
+    dest = _fb_dir(dest_parts)
+    policy = body.get("policy", "ask")
+    if policy not in ("ask", "replace", "rename", "skip"):
+        raise FBError("Unknown conflict choice.")
+    plan = []
+    for item in raw[:500]:
+        parts = _fb_parts(item, allow_empty=False)
+        if move and tuple(parts) in FB_PROTECTED:
+            raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be moved.")
+        src = _fb_abs(parts, must_exist=True)
+        is_dir = os.path.isdir(src)
+        if is_dir and dest_parts[:len(parts)] == parts:
+            raise FBError(f"'{parts[-1]}' cannot be put inside itself.")
+        why = _fb_slot_error(dest_parts + [parts[-1]], is_dir)
+        if why:
+            raise FBError(f"Cannot put '{parts[-1]}' here: {why}.")
+        same = parts[:-1] == dest_parts
+        plan.append((src, os.path.join(dest, parts[-1]), parts[-1], is_dir, same))
+    conflicts = [name for src, dst, name, is_dir, same in plan if os.path.exists(dst) and not (move and same)
+                 and not (not move and same)]
+    if conflicts and policy == "ask":
+        raise FBError("Some names already exist here.", 409, {"conflicts": conflicts})
+    st = {"done": 0, "replaced": 0, "renamed": 0, "skipped": 0}
+    for src, dst, name, is_dir, same in plan:
+        if move and same:
+            continue
+        eff = policy
+        if os.path.exists(dst):
+            if not move and same:
+                eff = "rename"                                  # copying into the same folder: make "name (1)"
+            if eff == "ask":
+                eff = "rename"
+            if eff == "skip":
+                st["skipped"] += 1
+                continue
+            if eff == "rename":
+                dst = _fb_unique(dst, is_dir)
+                if not (not move and same):
+                    st["renamed"] += 1
+        _fb_place(src, dst, move, "replace" if eff != "skip" else "skip", st)
+    return {"ok": True, **st}
+
+
+# ---------- zip reading ----------
+
+def _zip_scan(zf):
+    """(members, skipped, error). members = [(info, [cleaned segments])]. A path that tries to leave the folder (a
+    "zip slip"), too many entries, or an absurd compression ratio refuses the whole archive."""
+    infos = zf.infolist()
+    if len(infos) > UNZIP_MAX_ENTRIES:
+        return [], [], f"The zip holds more than {UNZIP_MAX_ENTRIES} entries."
+    members, skipped, total = [], [], 0
+    for info in infos:
+        name = info.filename.replace("\\", "/")
+        if name.endswith("/"):
+            continue
+        segs = [s for s in name.split("/") if s not in ("", ".")]
+        if not segs:
+            continue
+        if name.startswith("/") or any(s == ".." for s in segs) or re.match(r"^[A-Za-z]:", segs[0]):
+            return [], [], f"The zip contains an unsafe path ({info.filename!r}), so it was refused."
+        if any(s.startswith(".") or s == "__MACOSX" for s in segs):
+            continue                                            # macOS / editor leftovers: ignored without a fuss
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(mode):
+            skipped.append((name, "it is a link"))
+            continue
+        if info.flag_bits & 0x1:
+            skipped.append((name, "it is password protected"))
+            continue
+        ext = _fb_ext(segs[-1])
+        if ext not in FB_ALLOWED_EXTS:
+            skipped.append((name, f"files of type '{ext or 'none'}' are not allowed"))
+            continue
+        total += info.file_size
+        if info.file_size > 20 * 1024 * 1024 and info.file_size / max(info.compress_size, 1) > 1000:
+            return [], [], f"'{segs[-1]}' compresses suspiciously well (a zip bomb?), so the zip was refused."
+        if total > UNZIP_MAX_TOTAL:
+            return [], [], f"The zip unpacks to more than {UNZIP_MAX_TOTAL // (1024 * 1024)} MB (limit MAX_UNZIP_MB)."
+        clean = [_fb_clean_name(s) for s in segs]
+        if not all(clean):
+            skipped.append((name, "its name is not usable"))
+            continue
+        members.append((info, clean))
+    return members, skipped, None
+
+
+def _zip_extract(zf, members, base_parts, policy, budget):
+    """Write each member under static/<base_parts>/<its segments>. policy: skip | replace | rename."""
+    st = {"written": 0, "replaced": 0, "renamed": 0, "kept": 0, "bytes": 0, "skipped": []}
+    for info, segs in members:
+        label = "/".join(segs)
+        full = list(base_parts) + segs
+        why = _fb_slot_error(full, False)
+        if why:
+            st["skipped"].append((label, why))
+            continue
+        try:
+            dst = _fb_abs(full)
+            if os.path.isdir(dst):
+                st["skipped"].append((label, "a folder has that name"))
+                continue
+            exists = os.path.exists(dst)
+            if exists and policy == "skip":
+                st["kept"] += 1
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+        except (FBError, OSError) as exc:
+            st["skipped"].append((label, getattr(exc, "message", None) or "a file is in the way"))
+            continue
+        ext = _fb_ext(segs[-1])
+        tmp = os.path.join(os.path.dirname(dst), ".tmp-" + secrets.token_hex(4))
+        try:
+            with zf.open(info) as src, open(tmp, "wb") as out:
+                head = src.read(4096)
+                bad = _fb_verify(ext, head)
+                if bad:
+                    st["skipped"].append((label, bad))
+                    out.close()
+                    os.unlink(tmp)
+                    continue
+                if ext == ".svg":
+                    data = head + src.read(SVG_LIMIT + 1)
+                    clean, reason = check_svg(data)
+                    if not clean:
+                        st["skipped"].append((label, "SVG refused: " + reason))
+                        out.close()
+                        os.unlink(tmp)
+                        continue
+                    out.write(clean)
+                    written = len(clean)
+                else:
+                    out.write(head)
+                    written = len(head)
+                    while True:
+                        chunk = src.read(1024 * 256)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > info.file_size + 1024 or written > budget["left"]:
+                            raise FBError("The zip unpacked to more than it declared; stopped.")
+                        out.write(chunk)
+            budget["left"] -= written
+            if exists and policy == "rename":
+                dst = _fb_unique(dst)
+                st["renamed"] += 1
+            elif exists:
+                st["replaced"] += 1
+            os.replace(tmp, dst)
+            st["written"] += 1
+            st["bytes"] += written
+        except (zipfile.BadZipFile, zlib.error, EOFError):
+            st["skipped"].append((label, "the file inside the zip is damaged"))
+        except OSError as exc:
+            st["skipped"].append((label, f"could not be written ({exc.strerror or 'disk error'})"))
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+    return st
+
+
+def _fb_dest_conflicts(base_parts, members):
+    out = []
+    for info, segs in members:
+        try:
+            if os.path.exists(_fb_abs(list(base_parts) + segs)):
+                out.append("/".join(segs))
+        except FBError:
+            continue
+    return out
+
+
+# ---------- page and listing routes ----------
+
+@admin_bp.get("/files")
+def files():
+    return render_template("admin_files.html", start=request.args.get("path", ""), batch_limit=BIG_UPLOAD_LIMIT,
+                           edit_limit=FB_EDIT_LIMIT, allowed=sorted(FB_ALLOWED_EXTS))
+
+
+@admin_bp.get("/files/api/list")
+@_fb_api
+def files_list():
+    parts = _fb_parts(request.args.get("path"))
+    base = _fb_dir(parts)
+    q = (request.args.get("q") or "").strip().lower()
+    entries, truncated = [], False
+    if q:
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            rel = os.path.relpath(dirpath, os.path.realpath(app.static_folder)).replace(os.sep, "/")
+            here = [] if rel == "." else rel.split("/")
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not (not here and d in FB_HIDDEN_TOP))
+            try:
+                scan = [e for e in os.scandir(dirpath) if _fb_visible(e)]
+            except OSError:
+                continue
+            for e in sorted(scan, key=lambda x: x.name.lower()):
+                if q in e.name.lower():
+                    item = _fb_entry(here, e)
+                    item["where"] = "/".join(here)
+                    entries.append(item)
+                    if len(entries) >= FB_SEARCH_LIMIT:
+                        truncated = True
+                        break
+            if truncated:
+                break
+    else:
+        for e in os.scandir(base):
+            if not _fb_visible(e) or (not parts and e.name in FB_HIDDEN_TOP):
+                continue
+            entries.append(_fb_entry(parts, e))
+    return {"ok": True, "path": "/".join(parts), "entries": entries, "search": bool(q), "truncated": truncated,
+            "protected": tuple(parts) in FB_PROTECTED}
+
+
+@admin_bp.get("/files/api/tree")
+@_fb_api
+def files_tree():
+    parts = _fb_parts(request.args.get("path"))
+    base = _fb_dir(parts)
+    out = []
+    for e in sorted(os.scandir(base), key=lambda x: x.name.lower()):
+        if not _fb_visible(e) or not e.is_dir() or (not parts and e.name in FB_HIDDEN_TOP):
+            continue
+        try:
+            more = any(_fb_visible(c) and c.is_dir() for c in os.scandir(e.path))
+        except OSError:
+            more = False
+        out.append({"name": e.name, "path": "/".join(parts + [e.name]), "more": more})
+    return {"ok": True, "folders": out}
+
+
+@admin_bp.get("/files/api/props")
+@_fb_api
+def files_props():
+    parts = _fb_parts(request.args.get("path"), allow_empty=False)
+    path = _fb_abs(parts, must_exist=True)
+    st = os.stat(path)
+    out = {"ok": True, "name": parts[-1], "path": "/".join(parts), "mtime": int(st.st_mtime), "dir": os.path.isdir(path)}
+    if out["dir"]:
+        size = files_n = folders_n = 0
+        for dirpath, dirnames, names in os.walk(path):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            folders_n += len(dirnames)
+            for n in names:
+                if n.startswith("."):
+                    continue
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, n))
+                    files_n += 1
+                except OSError:
+                    pass
+        out.update(size=size, files=files_n, folders=folders_n)
+    else:
+        out.update(size=st.st_size, url=url_for("static", filename="/".join(parts)), type=_fb_ext(parts[-1]) or "file")
+    return out
+
+
+@admin_bp.post("/files/api/exists")
+@_fb_api
+def files_exists():
+    body = _fb_body()
+    dest = _fb_dir(_fb_parts(body.get("dest")))
+    names = body.get("names")
+    found = []
+    for rel in (names if isinstance(names, list) else [])[:5000]:
+        segs = [_fb_clean_name(s) for s in str(rel).replace("\\", "/").split("/") if s not in ("", ".")]
+        if segs and os.path.isfile(os.path.join(dest, *segs)):
+            found.append("/".join(segs))
+    return {"ok": True, "exists": found[:200], "count": len(found)}
+
+
+# ---------- changing things ----------
+
+@admin_bp.post("/files/api/mkdir")
+@_fb_api
+def files_mkdir():
+    body = _fb_body()
+    parts = _fb_parts(body.get("path"))
+    base = _fb_dir(parts)
+    name = _fb_check_name(body.get("name"))
+    why = _fb_slot_error(parts + [name], True)
+    if why:
+        raise FBError(why[0].upper() + why[1:] if why else why)
+    target = os.path.join(base, name)
+    if os.path.exists(target):
+        raise FBError(f"'{name}' already exists here.", 409)
+    os.mkdir(target)
+    return {"ok": True, "path": "/".join(parts + [name])}
+
+
+@admin_bp.post("/files/api/newfile")
+@_fb_api
+def files_newfile():
+    body = _fb_body()
+    parts = _fb_parts(body.get("path"))
+    base = _fb_dir(parts)
+    name = _fb_check_name(body.get("name"))
+    if _fb_ext(name) not in FB_TEXT_EXTS:
+        raise FBError("A new file must end in .txt, .md, .csv or .json.")
+    why = _fb_slot_error(parts + [name], False)
+    if why:
+        raise FBError(why[0].upper() + why[1:])
+    target = os.path.join(base, name)
+    if os.path.exists(target):
+        raise FBError(f"'{name}' already exists here.", 409)
+    with open(target, "x", encoding="utf-8") as fh:
+        fh.write("{}\n" if name.lower().endswith(".json") else "")
+    return {"ok": True, "path": "/".join(parts + [name])}
+
+
+@admin_bp.post("/files/api/rename")
+@_fb_api
+def files_rename():
+    body = _fb_body()
+    parts = _fb_parts(body.get("path"), allow_empty=False)
+    if tuple(parts) in FB_PROTECTED:
+        raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be renamed.")
+    src = _fb_abs(parts, must_exist=True)
+    name = _fb_check_name(body.get("name"))
+    is_dir = os.path.isdir(src)
+    if not is_dir and _fb_ext(name) not in FB_ALLOWED_EXTS:
+        raise FBError(f"Files of type '{_fb_ext(name) or 'none'}' are not allowed here.")
+    why = _fb_slot_error(parts[:-1] + [name], is_dir)
+    if why:
+        raise FBError(why[0].upper() + why[1:])
+    dst = os.path.join(os.path.dirname(src), name)
+    if os.path.exists(dst) and not os.path.samefile(src, dst):
+        raise FBError(f"'{name}' already exists here.", 409)
+    os.rename(src, dst)
+    return {"ok": True, "path": "/".join(parts[:-1] + [name])}
+
+
+@admin_bp.post("/files/api/move")
+@_fb_api
+def files_move():
+    return _fb_bulk(True)
+
+
+@admin_bp.post("/files/api/copy")
+@_fb_api
+def files_copy():
+    return _fb_bulk(False)
+
+
+@admin_bp.post("/files/api/delete")
+@_fb_api
+def files_delete():
+    raw = _fb_body().get("paths")
+    if not isinstance(raw, list) or not raw:
+        raise FBError("Choose at least one file or folder.")
+    targets = [_fb_parts(p, allow_empty=False) for p in raw[:500]]
+    for parts in targets:
+        if tuple(parts) in FB_PROTECTED:
+            raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be deleted.")
+    for parts in targets:
+        _fb_trash(parts)
+    log.info("admin: file browser moved %d item(s) to trash", len(targets))
+    return {"ok": True, "count": len(targets)}
+
+
+@admin_bp.post("/files/api/upload")
+@_fb_api
+def files_upload():
+    parts = _fb_parts(request.form.get("path"))
+    base = _fb_dir(parts)
+    policy = request.form.get("policy", "rename")
+    if policy not in ("replace", "rename", "skip"):
+        policy = "rename"
+    extract = request.form.get("extract") == "1"
+    uploads = request.files.getlist("files")
+    rels = request.form.getlist("relpath")
+    if not uploads:
+        raise FBError("No file was received. The upload may be bigger than the limit (MAX_UPLOAD_MB).")
+    out = {"ok": True, "saved": 0, "replaced": 0, "renamed": 0, "kept": 0, "skipped": [], "extracted": 0}
+    budget = {"left": UNZIP_MAX_TOTAL}
+    for i, f in enumerate(uploads):
+        rel = (rels[i] if i < len(rels) and rels[i] else f.filename) or ""
+        segs = [_fb_clean_name(s) for s in rel.replace("\\", "/").split("/") if s not in ("", ".", "..")]
+        segs = [s for s in segs if s]
+        label = "/".join(segs) or "(no name)"
+        if not segs:
+            out["skipped"].append([label, "it has no usable name"])
+            continue
+        ext = _fb_ext(segs[-1])
+        if ext not in FB_ALLOWED_EXTS:
+            out["skipped"].append([label, f"files of type '{ext or 'none'}' are not allowed"])
+            continue
+        head = f.stream.read(4096)
+        f.stream.seek(0)
+        bad = _fb_verify(ext, head)
+        if bad:
+            out["skipped"].append([label, bad])
+            continue
+        if extract and ext == ".zip":
+            try:
+                with zipfile.ZipFile(f.stream) as zf:
+                    members, skipped, err = _zip_scan(zf)
+                    if err:
+                        out["skipped"].append([label, err])
+                        continue
+                    stem = _fb_clean_name(os.path.splitext(segs[-1])[0]) or "unzipped"
+                    res = _zip_extract(zf, members, parts + segs[:-1] + [stem], policy, budget)
+                    out["extracted"] += res["written"]
+                    out["replaced"] += res["replaced"]
+                    out["renamed"] += res["renamed"]
+                    out["kept"] += res["kept"]
+                    out["skipped"] += [[n, r] for n, r in skipped + res["skipped"]]
+            except zipfile.BadZipFile:
+                out["skipped"].append([label, "it is not a readable zip"])
+            continue
+        full = parts + segs
+        why = _fb_slot_error(full, False)
+        if why:
+            out["skipped"].append([label, why])
+            continue
+        try:
+            dst = _fb_abs(full)
+            if os.path.isdir(dst):
+                out["skipped"].append([label, "a folder has that name"])
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+        except (FBError, OSError) as exc:
+            out["skipped"].append([label, getattr(exc, "message", None) or "a file is in the way"])
+            continue
+        exists = os.path.exists(dst)
+        if exists and policy == "skip":
+            out["kept"] += 1
+            continue
+        tmp = os.path.join(os.path.dirname(dst), ".tmp-" + secrets.token_hex(4))
+        try:
+            if ext == ".svg":
+                data = f.stream.read(SVG_LIMIT + 1)
+                clean, reason = check_svg(data)
+                if not clean:
+                    out["skipped"].append([label, "SVG refused: " + reason])
+                    continue
+                _atomic_write(tmp, clean)
+            else:
+                f.save(tmp)
+            if exists and policy == "rename":
+                dst = _fb_unique(dst)
+                out["renamed"] += 1
+            elif exists:
+                out["replaced"] += 1
+            os.replace(tmp, dst)
+            out["saved"] += 1
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+    log.info("admin: file browser upload into '%s': %d saved, %d skipped", "/".join(parts), out["saved"], len(out["skipped"]))
+    return out
+
+
+@admin_bp.post("/files/api/extract")
+@_fb_api
+def files_extract():
+    body = _fb_body()
+    zparts = _fb_parts(body.get("path"), allow_empty=False)
+    zpath = _fb_abs(zparts, must_exist=True)
+    if _fb_ext(zparts[-1]) != ".zip" or not os.path.isfile(zpath):
+        raise FBError("Choose a .zip file.")
+    mode = body.get("mode", "folder")
+    stem = os.path.splitext(zparts[-1])[0]
+    dest_parts = zparts[:-1] if mode == "here" else zparts[:-1] + [_fb_check_name(stem)]
+    policy = body.get("policy", "ask")
+    if policy not in ("ask", "replace", "rename", "skip"):
+        raise FBError("Unknown conflict choice.")
+    try:
+        zf = zipfile.ZipFile(zpath)
+    except zipfile.BadZipFile:
+        raise FBError("That file is not a readable zip.")
+    with zf:
+        members, skipped, err = _zip_scan(zf)
+        if err:
+            raise FBError(err)
+        if not members:
+            raise FBError("There is nothing in that zip that can be unpacked here.", 400,
+                          {"skipped": [[n, r] for n, r in skipped]})
+        conflicts = _fb_dest_conflicts(dest_parts, members)
+        if conflicts and policy == "ask":
+            raise FBError("Some files already exist there.", 409, {"conflicts": conflicts[:30], "count": len(conflicts)})
+        res = _zip_extract(zf, members, dest_parts, "replace" if policy == "ask" else policy, {"left": UNZIP_MAX_TOTAL})
+    log.info("admin: unzipped '%s' into '%s' (%d file(s))", "/".join(zparts), "/".join(dest_parts), res["written"])
+    return {"ok": True, "dest": "/".join(dest_parts), "written": res["written"], "replaced": res["replaced"],
+            "renamed": res["renamed"], "kept": res["kept"], "skipped": [[n, r] for n, r in skipped + res["skipped"]]}
+
+
+@admin_bp.get("/files/raw")
+def files_raw():
+    try:
+        parts = _fb_parts(request.args.get("path"), allow_empty=False)
+        path = _fb_abs(parts, must_exist=True)
+    except FBError:
+        abort(404)
+    ext = _fb_ext(parts[-1])
+    if not os.path.isfile(path) or ext not in FB_ALLOWED_EXTS:
+        abort(404)
+    mime = {".json": "application/json", ".csv": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+            ".md": "text/plain; charset=utf-8", ".svg": "image/svg+xml"}.get(ext) or mimetypes.guess_type(parts[-1])[0] or "application/octet-stream"
+    download = request.args.get("dl") == "1"
+    resp = send_file(path, mimetype=mime.split(";")[0], as_attachment=download, download_name=parts[-1], conditional=True)
+    if mime.startswith("text/plain"):
+        resp.headers["Content-Type"] = mime
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+    if ext == ".svg":
+        resp.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+    return resp
+
+
+@admin_bp.get("/files/api/text")
+@_fb_api
+def files_text_read():
+    parts = _fb_parts(request.args.get("path"), allow_empty=False)
+    path = _fb_abs(parts, must_exist=True)
+    if _fb_ext(parts[-1]) not in FB_TEXT_EXTS or not os.path.isfile(path):
+        raise FBError("Only .json, .csv, .txt and .md files can be edited here.")
+    if os.path.getsize(path) > FB_EDIT_LIMIT:
+        raise FBError(f"That file is larger than {FB_EDIT_LIMIT // 1024} KB; download it to edit it.")
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as fh:
+            text = fh.read()
+    except UnicodeDecodeError:
+        raise FBError("That file is not UTF-8 text, so it cannot be edited here.")
+    return {"ok": True, "text": text, "mtime": os.path.getmtime(path), "name": parts[-1]}
+
+
+@admin_bp.post("/files/api/text")
+@_fb_api
+def files_text_save():
+    body = _fb_body()
+    parts = _fb_parts(body.get("path"), allow_empty=False)
+    path = _fb_abs(parts, must_exist=True)
+    ext = _fb_ext(parts[-1])
+    if ext not in FB_TEXT_EXTS or not os.path.isfile(path):
+        raise FBError("Only .json, .csv, .txt and .md files can be edited here.")
+    text = body.get("text")
+    if not isinstance(text, str):
+        raise FBError("Nothing to save.")
+    if len(text.encode("utf-8")) > FB_EDIT_LIMIT:
+        raise FBError(f"That is larger than {FB_EDIT_LIMIT // 1024} KB.")
+    known = body.get("mtime")
+    if known is not None and not body.get("force") and abs(os.path.getmtime(path) - float(known)) > 0.01:
+        raise FBError("This file was changed by someone else since you opened it.", 409, {"changed": True})
+    if ext == ".json":
+        try:
+            json.loads(text)
+        except ValueError as exc:
+            raise FBError(f"That is not valid JSON, so it was not saved: {exc}")
+    _atomic_write(path, text)
+    log.info("admin: edited '%s' in the file browser", "/".join(parts))
+    return {"ok": True, "mtime": os.path.getmtime(path)}
+
+
+# ---------- download as zip ----------
+
+def _fb_zip_items(parts_list):
+    """(absolute path, name inside the zip) for every file under the chosen items; hidden files and links are left out."""
+    items, total = [], 0
+    for parts in parts_list:
+        top = _fb_abs(parts, must_exist=True)
+        base = parts[-1]
+        if os.path.isdir(top):
+            items.append((None, base + "/"))
+            for dirpath, dirnames, names in os.walk(top, followlinks=False):
+                dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
+                rel = os.path.relpath(dirpath, top).replace(os.sep, "/")
+                prefix = base if rel == "." else base + "/" + rel
+                if rel != ".":
+                    items.append((None, prefix + "/"))
+                for n in sorted(names):
+                    full = os.path.join(dirpath, n)
+                    if n.startswith(".") or os.path.islink(full):
+                        continue
+                    total += os.path.getsize(full)
+                    items.append((full, prefix + "/" + n))
+        elif not os.path.islink(top):
+            total += os.path.getsize(top)
+            items.append((top, base))
+        if total > UNZIP_MAX_TOTAL:
+            raise FBError(f"That is more than {UNZIP_MAX_TOTAL // (1024 * 1024)} MB; download it in smaller parts.")
+    return items
+
+
+def _temp_download(path, name, mimetype="application/zip"):
+    """Send a temporary file as a download and delete it afterwards, even when the browser stops halfway."""
+    size = os.path.getsize(path)
+
+    def stream():
+        try:
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(256 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    resp = Response(stream(), mimetype=mimetype)
+    resp.headers.set("Content-Disposition", "attachment", filename=name)
+    resp.headers["Content-Length"] = str(size)
+    return resp
+
+
+def _zip_response(items, name):
+    fd, tmp = tempfile.mkstemp(prefix="belajar-zip-", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for full, arc in items:
+                if full is None:
+                    zf.writestr(zipfile.ZipInfo(arc), b"")
+                else:
+                    zf.write(full, arc)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return _temp_download(tmp, name)
+
+
+@admin_bp.post("/files/zip")
+def files_zip():
+    try:
+        parts_list = [_fb_parts(p, allow_empty=False) for p in request.form.getlist("paths")[:500]]
+        if not parts_list:
+            raise FBError("Choose at least one file or folder.")
+        items = _fb_zip_items(parts_list)
+    except FBError as exc:
+        abort(400, exc.message)
+    name = (parts_list[0][-1] if len(parts_list) == 1 else "belajar-files") + ".zip"
+    if len(parts_list) > 1:
+        name = f"belajar-files-{datetime.now().strftime('%Y%m%d-%H%M')}.zip"
+    return _zip_response(items, name)
+
+
+# ===========================================================================
+# Content transfer: one zip with the site's content, to move it to another server
+# (the code travels through git; the content never does)
+# ===========================================================================
+
+TRANSFER_MANIFEST = "belajar-export.json"
+TRANSFER_PARTS = [
+    ("courses", "Courses", "course"),
+    ("instructors", "Instructors", "instructors"),
+    ("webinars", "Webinars", "webinars"),
+    ("images", "Images", "images"),
+    ("branding", "Logos and branding settings", "logo"),
+    ("other", "Other files in static/ (default webinar picture, anything you added yourself)", None),
+]
+_TRANSFER_BY_FOLDER = {folder: pid for pid, _, folder in TRANSFER_PARTS if folder}
+TRANSFER_IDS = [p[0] for p in TRANSFER_PARTS]
+
+
+def _transfer_part_of(rel_segs):
+    """Which export part a path under static/ belongs to (None for code that is never exported)."""
+    if not rel_segs or rel_segs[0] in FB_HIDDEN_TOP:
+        return None
+    return _TRANSFER_BY_FOLDER.get(rel_segs[0], "other") if len(rel_segs) > 1 or rel_segs[0] in _TRANSFER_BY_FOLDER else "other"
+
+
+def _transfer_walk():
+    """(absolute path, segments under static/, size) for every exportable file."""
+    root = os.path.realpath(app.static_folder)
+    for dirpath, dirnames, names in os.walk(root, followlinks=False):
+        rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        here = [] if rel == "." else rel.split("/")
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not (not here and d in FB_HIDDEN_TOP)
+                             and not os.path.islink(os.path.join(dirpath, d)))
+        for n in sorted(names):
+            full = os.path.join(dirpath, n)
+            if n.startswith(".") or os.path.islink(full) or _fb_ext(n) not in FB_ALLOWED_EXTS or _FB_NAME_BAD.search(n):
+                continue
+            try:
+                size = os.path.getsize(full)
+            except OSError:
+                continue
+            yield full, here + [n], size
+
+
+def _transfer_stats():
+    stats = {pid: {"files": 0, "size": 0} for pid in TRANSFER_IDS}
+    for _, segs, size in _transfer_walk():
+        pid = _transfer_part_of(segs)
+        if pid:
+            stats[pid]["files"] += 1
+            stats[pid]["size"] += size
+    return stats
+
+
+def _import_dir():
+    return os.path.join(os.path.dirname(app.static_folder), "_import")
+
+
+def _import_clean_old():
+    root = _import_dir()
+    if not os.path.isdir(root):
+        return
+    for n in os.listdir(root):
+        p = os.path.join(root, n)
+        try:
+            if time.time() - os.path.getmtime(p) > 24 * 3600:
+                os.unlink(p)
+        except OSError:
+            pass
+
+
+def _import_path(token):
+    if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+        abort(404)
+    path = os.path.join(_import_dir(), token + ".zip")
+    if not os.path.isfile(path):
+        abort(404)
+    return path
+
+
+def _import_analyse(zpath):
+    """(info, error). info lists what the bundle holds, per part, and how much of it already exists here."""
+    try:
+        zf = zipfile.ZipFile(zpath)
+    except zipfile.BadZipFile:
+        return None, "That file is not a readable zip."
+    with zf:
+        members, skipped, err = _zip_scan(zf)
+        if err:
+            return None, err
+        manifest = None
+        if TRANSFER_MANIFEST in zf.namelist():
+            try:
+                manifest = json.loads(zf.read(TRANSFER_MANIFEST).decode("utf-8-sig"))
+            except (ValueError, UnicodeDecodeError, KeyError):
+                return None, "The export information inside the zip is damaged."
+            if not isinstance(manifest, dict) or manifest.get("app") != "belajar" or manifest.get("format") != 1:
+                return None, "This zip was not made by this site's Export (or is from an incompatible version)."
+        parts = {pid: {"files": 0, "size": 0, "existing": 0} for pid in TRANSFER_IDS}
+        usable, odd = [], []
+        for info, segs in members:
+            if segs[0] != "static" or len(segs) < 2:
+                if segs == [TRANSFER_MANIFEST]:
+                    continue
+                odd.append(("/".join(segs), "it is not inside a static/ folder"))
+                continue
+            rel = segs[1:]
+            pid = _transfer_part_of(rel)
+            if pid is None:
+                odd.append(("/".join(segs), "code files are never imported"))
+                continue
+            why = _fb_slot_error(rel, False)
+            if why:
+                odd.append(("/".join(segs), why))
+                continue
+            parts[pid]["files"] += 1
+            parts[pid]["size"] += info.file_size
+            try:
+                if os.path.exists(_fb_abs(rel)):
+                    parts[pid]["existing"] += 1
+            except FBError:
+                pass
+            usable.append((info, rel, pid))
+        if not usable:
+            return None, "There is no site content in that zip."
+    return {"parts": parts, "skipped": [[n, r] for n, r in skipped + odd], "manifest": manifest, "count": len(usable)}, None
+
+
+@admin_bp.get("/transfer")
+def transfer():
+    _import_clean_old()
+    return render_template("admin_transfer.html", parts=TRANSFER_PARTS, stats=_transfer_stats(), limit=BIG_UPLOAD_LIMIT)
+
+
+@admin_bp.post("/transfer/export")
+def transfer_export():
+    chosen = [p for p in request.form.getlist("parts") if p in TRANSFER_IDS]
+    if not chosen:
+        flash("Tick at least one part to export.", "error")
+        return redirect(url_for("admin.transfer"))
+    items, counts = [], {pid: 0 for pid in chosen}
+    for full, segs, size in _transfer_walk():
+        pid = _transfer_part_of(segs)
+        if pid in counts:
+            items.append((full, "static/" + "/".join(segs)))
+            counts[pid] += 1
+    stamp = datetime.now().strftime("%Y%m%d-%H%M")
+    manifest = {"app": "belajar", "format": 1, "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "parts": chosen, "files": counts}
+    fd, tmp = tempfile.mkstemp(prefix="belajar-export-", suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(TRANSFER_MANIFEST, json.dumps(manifest, indent=2) + "\n")
+            for full, arc in items:
+                zf.write(full, arc)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    log.info("admin: exported %d file(s) (%s)", len(items), ", ".join(chosen))
+    return _temp_download(tmp, f"belajar-content-{stamp}.zip")
+
+
+@admin_bp.post("/transfer/import/upload")
+def transfer_import_upload():
+    bundle = request.files.get("bundle")
+    if not bundle or not bundle.filename:
+        return jsonify({"ok": False, "error": "Choose the zip you exported."}), 400
+    os.makedirs(_import_dir(), exist_ok=True)
+    token = secrets.token_hex(16)
+    path = os.path.join(_import_dir(), token + ".zip")
+    bundle.save(path)
+    info, err = _import_analyse(path)
+    if err:
+        os.unlink(path)
+        return jsonify({"ok": False, "error": err}), 400
+    return jsonify({"ok": True, "url": url_for("admin.transfer_import_review", token=token)})
+
+
+@admin_bp.get("/transfer/import/<token>")
+def transfer_import_review(token):
+    path = _import_path(token)
+    info, err = _import_analyse(path)
+    if err:
+        flash(err, "error")
+        return redirect(url_for("admin.transfer"))
+    return render_template("admin_import.html", token=token, info=info, parts=TRANSFER_PARTS)
+
+
+@admin_bp.post("/transfer/import/<token>/apply")
+def transfer_import_apply(token):
+    path = _import_path(token)
+    mode = request.form.get("mode", "add")
+    chosen = [p for p in request.form.getlist("parts") if p in TRANSFER_IDS]
+    if mode not in ("add", "overwrite", "replace") or not chosen:
+        flash("Choose what to import and how.", "error")
+        return redirect(url_for("admin.transfer_import_review", token=token))
+    zf = zipfile.ZipFile(path)
+    with zf:
+        members, skipped, err = _zip_scan(zf)
+        if err:
+            flash(err, "error")
+            return redirect(url_for("admin.transfer"))
+        wanted = []
+        for info, segs in members:
+            if segs[0] == "static" and len(segs) > 1 and _transfer_part_of(segs[1:]) in chosen:
+                wanted.append((info, segs[1:]))
+        if mode == "replace":
+            # the current content of the chosen parts goes to the trash first, so nothing is lost for good
+            for pid in chosen:
+                folder = next(f for p, _, f in TRANSFER_PARTS if p == pid)
+                if folder:
+                    target = _fb_abs([folder])
+                    if os.path.isdir(target) and any(_fb_visible(e) for e in os.scandir(target)):
+                        _fb_trash([folder], force=True)
+                    os.makedirs(target, exist_ok=True)
+                else:
+                    for e in list(os.scandir(_fb_abs([]))):
+                        if _fb_visible(e) and e.name not in FB_HIDDEN_TOP and e.name not in _TRANSFER_BY_FOLDER:
+                            _fb_trash([e.name], force=True)
+        res = _zip_extract(zf, wanted, [], "skip" if mode == "add" else "replace", {"left": UNZIP_MAX_TOTAL})
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    log.info("admin: imported %d file(s) (%s, mode %s), %d skipped", res["written"], ", ".join(chosen), mode, len(res["skipped"]))
+    for name, why in res["skipped"][:20]:
+        log.warning("import: skipped %s (%s)", name, why)
+    msg = f"Imported {res['written']} file(s)"
+    if res["replaced"]:
+        msg += f", {res['replaced']} replaced"
+    if res["kept"]:
+        msg += f", {res['kept']} already here and left alone"
+    if res["skipped"]:
+        msg += f", {len(res['skipped'])} skipped (see the log on the system page)"
+    flash(msg + ".", "success" if res["written"] or not res["skipped"] else "error")
+    return redirect(url_for("admin.transfer"))
+
 
 
 app.register_blueprint(admin_bp)

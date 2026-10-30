@@ -1,0 +1,64 @@
+{% extends "admin_base.html" %}
+{% block title %}import{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>import</h1>
+    <span class="sub">{{ info.count }} file(s) found{% if info.manifest and info.manifest.created %} · exported {{ info.manifest.created }}{% endif %}</span>
+</div>
+
+<form method="post" action="{{ url_for('admin.transfer_import_apply', token=token) }}" data-confirm-replace>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <section class="panel">
+        <header><b>1 · what to import</b></header>
+        <div class="body">
+            <div class="tr-parts">
+                {% for pid, label, folder in parts %}
+                {% set p = info.parts[pid] %}
+                <label>
+                    <input type="checkbox" name="parts" value="{{ pid }}" {{ 'checked' if p.files }} {{ 'disabled' if not p.files }}>
+                    <span>{{ label }}</span>
+                    <span class="meta">{{ p.files }} file(s) · {{ p.size|filesize }}{% if p.files %} · {{ p.existing }} already exist here, {{ p.files - p.existing }} are new{% endif %}</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <header><b>2 · how to apply it</b></header>
+        <div class="body">
+            <div class="tr-modes">
+                <label><input type="radio" name="mode" value="add" checked><span><b>add only what is new</b></span><small>Files that already exist here are left exactly as they are. Safest; use it to top up a site.</small></label>
+                <label><input type="radio" name="mode" value="overwrite"><span><b>add and overwrite</b></span><small>Files with the same name are replaced by the ones in the zip. Things only on this server stay.</small></label>
+                <label><input type="radio" name="mode" value="replace"><span><b>make this server match the zip</b></span><small>The current content of each ticked part is moved to the trash first (restorable), then the zip's content is put in. Use it for a fresh copy.</small></label>
+            </div>
+            <button class="a-btn primary" type="submit">import now</button>
+            <a class="a-btn" href="{{ url_for('admin.transfer') }}">cancel</a>
+        </div>
+    </section>
+</form>
+
+{% if info.skipped %}
+<section class="panel">
+    <header><b>{{ info.skipped|length }} file(s) in the zip will be skipped</b></header>
+    <div class="body">
+        <ul class="plain">
+            {% for name, why in info.skipped[:40] %}<li><span class="mono-sm">{{ name }}</span> <span class="dim">- {{ why }}</span></li>{% endfor %}
+            {% if info.skipped|length > 40 %}<li class="dim">… and {{ info.skipped|length - 40 }} more</li>{% endif %}
+        </ul>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!f.hasAttribute || !f.hasAttribute('data-confirm-replace')) return;
+    var mode = f.querySelector('input[name=mode]:checked');
+    if (mode && mode.value === 'replace' && !window.confirm('Move the current content of the ticked parts to the trash and put the zip content in its place?')) e.preventDefault();
+});
+</script>
+{% endblock %}

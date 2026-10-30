@@ -1,0 +1,115 @@
+{% extends "admin_base.html" %}
+{% block title %}files{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>files</h1>
+    <span class="sub">everything under static/ (code folders are not shown) · deleted items go to the trash, not away for good</span>
+    <div class="right">
+        <a class="a-btn small" href="{{ url_for('admin.transfer') }}">export / import all content →</a>
+    </div>
+</div>
+
+<section class="panel fb" id="fb" data-base="{{ url_for('admin.files') }}" data-csrf="{{ csrf_token }}"
+         data-start="{{ start }}" data-limit="{{ batch_limit }}" data-edit-limit="{{ edit_limit }}">
+    <header class="fb-bar" role="toolbar" aria-label="file actions">
+        <div class="fb-group">
+            <button class="a-btn small primary" type="button" data-act="upload" title="Upload files (or drop them on the list)">⬆ upload</button>
+            <button class="a-btn small" type="button" data-act="upload-folder" title="Upload a whole folder">⬆ folder</button>
+            <button class="a-btn small" type="button" data-act="mkdir" title="New folder">+ folder</button>
+            <button class="a-btn small" type="button" data-act="newfile" title="New text file (.txt .md .csv .json)">+ file</button>
+        </div>
+        <div class="fb-group">
+            <button class="a-btn small" type="button" data-act="copy" data-need="1" title="Copy (Ctrl+C)">copy</button>
+            <button class="a-btn small" type="button" data-act="cut" data-need="1" title="Cut (Ctrl+X)">cut</button>
+            <button class="a-btn small" type="button" data-act="paste" data-need="clip" title="Paste (Ctrl+V)">paste</button>
+            <button class="a-btn small" type="button" data-act="rename" data-need="one" title="Rename (F2)">rename</button>
+            <button class="a-btn small danger" type="button" data-act="delete" data-need="1" title="Move to trash (Delete)">delete</button>
+        </div>
+        <div class="fb-group">
+            <button class="a-btn small" type="button" data-act="download" data-need="1" title="Download">download</button>
+            <button class="a-btn small" type="button" data-act="zip" data-need="1" title="Download the selection as one zip">zip</button>
+            <button class="a-btn small" type="button" data-act="extract" data-need="zip" title="Unpack the selected zip">unzip</button>
+            <button class="a-btn small" type="button" data-act="props" data-need="one" title="Properties">info</button>
+        </div>
+        <span class="a-spacer"></span>
+        <div class="fb-group fb-right">
+            <input type="search" id="fb-search" placeholder="search in this folder…" aria-label="search file names" autocomplete="off">
+            <select id="fb-sort" aria-label="sort by">
+                <option value="name">name</option>
+                <option value="mtime">newest</option>
+                <option value="size">size</option>
+                <option value="type">type</option>
+            </select>
+            <button class="a-btn small" type="button" data-act="sortdir" title="Reverse the order">↕</button>
+            <button class="a-btn small" type="button" data-act="view" title="List or thumbnails">▦</button>
+            <button class="a-btn small" type="button" data-act="refresh" title="Refresh">⟳</button>
+        </div>
+    </header>
+
+    <div class="fb-main">
+        <aside class="fb-tree" id="fb-tree" aria-label="folders"></aside>
+        <div class="fb-pane" id="fb-pane">
+            <nav class="fb-crumbs" id="fb-crumbs" aria-label="location"></nav>
+            <div class="fb-list list" id="fb-list" tabindex="0" aria-label="files"></div>
+            <div class="fb-drop" id="fb-drop" hidden><span>drop to upload</span></div>
+            <footer class="fb-status">
+                <span id="fb-count"></span>
+                <span class="a-spacer"></span>
+                <span id="fb-clip" class="dim"></span>
+                <span id="fb-prog" class="fb-prog" hidden><i></i><b></b></span>
+            </footer>
+        </div>
+    </div>
+
+    <input type="file" id="fb-pick" multiple hidden>
+    <input type="file" id="fb-pick-dir" webkitdirectory multiple hidden>
+</section>
+
+<p class="dim fb-help">
+    Click selects · Ctrl/Shift-click selects several · double-click opens · drag items onto a folder to move them (hold Ctrl to copy) ·
+    drop files from your computer to upload · right-click for more · F2 rename · Delete trash · Ctrl+C / X / V · Backspace goes up.
+    Allowed types: images, PDF, Office/OpenDocument files, txt/md/csv/json, zip, common audio and video. Everything in static/ is public on the website.
+</p>
+
+<dialog id="fb-dlg" class="fb-dlg">
+    <form method="dialog" id="fb-dlg-form">
+        <h3 id="fb-dlg-title"></h3>
+        <div id="fb-dlg-body"></div>
+        <div class="fb-dlg-btns" id="fb-dlg-btns"></div>
+    </form>
+</dialog>
+
+<dialog id="fb-view" class="fb-dlg fb-view">
+    <div class="fb-view-bar">
+        <b id="fb-view-name"></b>
+        <span class="a-spacer"></span>
+        <a class="a-btn small" id="fb-view-open" target="_blank" rel="noopener">open in tab ↗</a>
+        <button class="a-btn small" type="button" id="fb-view-prev" aria-label="previous">←</button>
+        <button class="a-btn small" type="button" id="fb-view-next" aria-label="next">→</button>
+        <button class="a-btn small" type="button" id="fb-view-close">close</button>
+    </div>
+    <div class="fb-view-body" id="fb-view-body"></div>
+</dialog>
+
+<dialog id="fb-edit" class="fb-dlg fb-edit">
+    <div class="fb-view-bar">
+        <b id="fb-edit-name"></b>
+        <span class="dim" id="fb-edit-state"></span>
+        <span class="a-spacer"></span>
+        <button class="a-btn small primary" type="button" id="fb-edit-save">save (Ctrl+S)</button>
+        <button class="a-btn small" type="button" id="fb-edit-close">close</button>
+    </div>
+    <textarea id="fb-edit-text" spellcheck="false" wrap="off"></textarea>
+    <div class="fb-edit-msg" id="fb-edit-msg"></div>
+</dialog>
+
+<div class="fb-menu" id="fb-menu" hidden></div>
+<div class="fb-toasts" id="fb-toasts" aria-live="polite"></div>
+<form id="fb-zipform" method="post" action="{{ url_for('admin.files_zip') }}" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ asset('js/admin_files.js') }}"></script>
+{% endblock %}

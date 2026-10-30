@@ -23,6 +23,33 @@ Home page: the **2 newest** courses appear as compact side-by-side cards; with o
 
 On screens 1024px and wider, everything below the banner and the nav bar is shown at 80% (like 80% browser zoom: text, images, spacing). To change it, edit `--site-zoom` in the last block of `static/css/main.css` (`0.8` now; `1` turns it off). Phones and tablets are not affected. The admin console has its own stylesheet and is not scaled.
 
+## Moving to another server (git for code, zip for content)
+
+Courses, instructors, webinars, images and logos are your data, not code, so `.gitignore` keeps them out of the repository (the five folders under `static/` are kept empty with a `.gitkeep`). A normal `git push` therefore carries only the code. The content moves through the admin **transfer** page:
+
+1. **Old server:** admin, *transfer*, tick the parts, *download the content zip* (images, PDFs and every file of every course, instructor and webinar, plus `branding.json`).
+2. **New server:** `git clone`, `pip install -r requirements.txt`, `python app.py` (a fresh admin password and secret key are generated; set your own with `ADMIN_PASSWORD` / `SECRET_KEY`).
+3. **New server:** admin, *transfer*, drop the zip on the import box. You see what it contains and how much already exists, then choose *add only what is new*, *add and overwrite* or *make this server match the zip* (which first moves the current content to the trash, so it is restorable).
+
+The zip never contains code, the admin password, the secret key, the trash or hidden files. It is checked while importing: only allowed file types, real file contents, no paths leaving `static/`, size and entry limits.
+
+## File browser
+
+Admin, *files*: a full file manager for everything under `static/` (the `css` and `js` code folders are not shown, and nothing outside `static/` can be reached).
+
+- Folder tree, breadcrumbs, list or thumbnail view, sort, search in the current folder and its sub-folders.
+- Upload files or whole folders (button or drag and drop, with progress), new folder, new text file, rename, copy, cut, paste, move by dragging (hold Ctrl to copy), properties with the public link.
+- Name clashes always ask: replace, keep both, or skip.
+- **Delete moves to the trash** (admin, *trash*), where it can be restored in place. Core folders (`course`, `instructors`, `webinars`, `images`, `logo`) cannot be deleted, renamed or moved.
+- Preview images, PDF, audio and video. Edit `.json`, `.csv`, `.txt` and `.md` in place (JSON is validated before it is saved; Ctrl+S saves).
+- **Zip:** upload a zip and unpack it (into a folder named after it, or right here), unzip a zip already on the server, or select files and folders and download them as one zip.
+- Keyboard: click / Ctrl-click / Shift-click, Ctrl+A, F2, Delete, Enter, Backspace (up), Ctrl+C / X / V, arrow keys.
+- Inside `course/`, `instructors/` and `webinars/` every folder is one course, person or webinar, so folder names must be lowercase slugs and loose files are not accepted there.
+
+Safety: allowed types only (images, PDF, Office/OpenDocument, txt/md/csv/json, zip, common audio/video; never html, js, py, exe...), file contents are checked against the type, SVGs go through the same check as logos, hostile names and `..` paths are refused, links are ignored, zip bombs and "zip slip" archives are refused. Everything in `static/` is public on the website, so put only what you want shown there.
+
+Limits (environment variables): `MAX_UPLOAD_MB` (default 300, per upload batch or import zip) and `MAX_UNZIP_MB` (default 1000, what a zip may unpack to). The browser splits big uploads into batches automatically. This needs Flask 3.1 or newer (`pip install -U Flask`); on older Flask uploads are limited to 12 MB.
+
 ## Adding content (no code changes needed)
 
 Courses, instructors and webinars are read from folders on every page load, so just add or edit files and refresh the browser.
@@ -144,6 +171,8 @@ What it does:
 | webinars | add, edit, hide and delete live sessions (see below) |
 | branding | logo, hero picture and hero text (see below) |
 | trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `static/`), restorable or deletable forever |
+| files | the file browser (below) |
+| transfer | export / import all content as one zip (below) |
 | system | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
 
 ### Instructors section
