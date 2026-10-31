@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>files</h1>
-    <span class="sub">everything under static/ (code folders are not shown) · deleted items go to the trash, not away for good</span>
+    <span class="sub">everything under content/ (courses, instructors, webinars, pictures, logos) · deleted items go to the trash, not away for good</span>
     <div class="right">
         <a class="a-btn small" href="{{ url_for('admin.transfer') }}">export / import all content →</a>
     </div>
@@ -68,7 +68,7 @@
 <p class="dim fb-help">
     Click selects · Ctrl/Shift-click selects several · double-click opens · drag items onto a folder to move them (hold Ctrl to copy) ·
     drop files from your computer to upload · right-click for more · F2 rename · Delete trash · Ctrl+C / X / V · Backspace goes up.
-    Allowed types: images, PDF, Office/OpenDocument files, txt/md/csv/json, zip, common audio and video. Everything in static/ is public on the website.
+    Allowed types: images, PDF, Office/OpenDocument files, txt/md/csv/json, zip, common audio and video. Files here are public at /media/ (data files such as .json and curriculum.csv are never served).
 </p>
 
 <dialog id="fb-dlg" class="fb-dlg">

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import person_photo with context %}
 {% block content %}
 {% set s = brand.slide %}
 {% set slide_count = 1 + hero_webinars|length %}
@@ -15,12 +16,12 @@
                         {% if s.text %}<p class="hs-text">{{ s.text }}</p>{% endif %}
                         <div class="hero-actions">
                             {% if s.primary_label %}<a class="button button-primary" href="{{ url_for('course_details') }}">{{ s.primary_label }} →</a>{% endif %}
-                            {% if s.secondary_label %}<a class="button button-outline" href="{{ url_for('about') }}">{{ s.secondary_label }}</a>{% endif %}
+                            {% if s.secondary_label %}<a class="button button-outline" href="{{ url_for('team') }}">{{ s.secondary_label }}</a>{% endif %}
                         </div>
                     </div>
                     {% if s.image_url %}
                     <div class="hs-visual">
-                        <div class="hs-frame shape-{{ s.shape }}{{ ' tilt' if s.tilt }}" style="aspect-ratio: {{ '1 / 1' if s.shape == 'circle' else s.css_ratio }}">
+                        <div class="hs-frame shape-{{ s.shape }}{{ ' tilt' if s.tilt }}" style="aspect-ratio: {{ '1 / 1' if s.shape == 'circle' else s.css_ratio }}{{ '; ' ~ s.frame_css if s.frame_css }}">
                             <img src="{{ s.image_url }}" alt="" style="object-fit: {{ s.fit }}; object-position: {{ s.x }}% {{ s.y }}%; transform: scale({{ '%.2f'|format(s.zoom / 100) }}); transform-origin: {{ s.x }}% {{ s.y }}%">
                         </div>
                     </div>
@@ -53,7 +54,8 @@
                     </div>
                     <div class="hs-visual">
                         <div class="hs-cover">
-                            <div class="hs-frame shape-rounded tilt" style="aspect-ratio: 3 / 2"><img src="{{ asset(w.cover) }}" alt="" style="object-fit: cover"></div>
+                            {% set cs = imgstyle(w.cover_style, 'cover') %}
+                            <div class="hs-frame shape-rounded tilt" style="aspect-ratio: 3 / 2{{ '; ' ~ cs.frame if cs.frame }}"><img src="{{ asset(w.cover) }}" alt="" style="object-fit: cover{{ '; ' ~ cs.img if cs.img }}"></div>
                             <div class="hs-date" aria-label="{{ w.date_label }}"><span>{{ w.month_short }}</span><b>{{ w.day }}</b><span>{{ w.weekday_short }}</span></div>
                             <div class="hs-chip"><span class="hs-dot-live" aria-hidden="true"></span>{{ w.capacity or 'Open to everyone' }}</div>
                         </div>
@@ -92,7 +94,7 @@
         <p>Build a strong foundation with guided projects, mentorship, and a community that helps you ship code confidently.</p>
     </div>
     {# 1 course = one wide card using the whole section; 2 courses = two compact cards side by side #}
-    <div class="course-grid wide {{ 'course-grid-1' if featured_courses|length == 1 else 'course-grid-2' }}">
+    <div class="course-grid wide {{ 'course-grid-1' if featured_courses|length == 1 else 'course-grid-2 cards-2' }}">
         {% for course in featured_courses %}
         {% include "_course_card.html" %}
         {% endfor %}
@@ -132,21 +134,23 @@
 </section>
 {% endif %}
 
-<section class="container founder-preview grid-2">
+<section class="container founder-preview{{ ' grid-2' if founders }}">
     <div>
         <p class="section-label">Two Graduates Who Learned the Hard Way</p>
         <h2>We built the class we wished we had in university.</h2>
         <p>From theory-heavy lectures to practical, project-oriented learning — our mission is to give students the confidence and guidance we wanted when we were starting out.</p>
-        <a class="button button-secondary" href="{{ url_for('about') }}">Read the Full Story</a>
+        <a class="button button-secondary" href="{{ url_for('team') }}">Read the Full Story</a>
     </div>
-    <div class="founder-photos">
-        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author1.png') }}" alt="Ahnaf">
-</div>
-        <div class="founder-photo"><img src="{{ url_for('static', filename='images/Author2.jpg') }}" alt="Shumon">
-</div>
-
-        <p class="photo-caption">Ahnaf & Shumon — Co-founders · Jashore, 2026</p>
+    {% if founders %}
+    <div class="tm-duo tm-duo-{{ [founders|length, 4]|min }}">
+        {% for p in founders[:4] %}
+        <a class="tm-duo-card" href="{{ url_for('instructor_profile', slug=p.slug) }}">
+            {{ person_photo(p, 'tm-duo-photo') }}
+            <span class="tm-duo-cap"><b>{{ p.name }}</b>{% if p.role %}<small>{{ p.role }}</small>{% endif %}</span>
+        </a>
+        {% endfor %}
     </div>
+    {% endif %}
 </section>
 
 {% if hero_webinars %}

@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex, nofollow" />
-    <title>{% block title %}console{% endblock %} · belajar</title>
+    <title>{% block title %}console{% endblock %} · {{ site_name|lower }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}" />
 </head>
 <body class="admin {% block bodyclass %}{% endblock %}">
 {% block shell %}
     <header class="a-top">
-        <a class="a-brand" href="{{ url_for('admin.dashboard') }}">belajar<span>@console</span></a>
+        <a class="a-brand" href="{{ url_for('admin.dashboard') }}">{{ site_name|lower }}<span>@console</span></a>
         <nav class="a-nav">
             <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint in ('admin.dashboard', 'admin.course_edit') }}">courses</a>
             <a href="{{ url_for('admin.course_new') }}" class="{{ 'on' if request.endpoint == 'admin.course_new' }}">+ new</a>

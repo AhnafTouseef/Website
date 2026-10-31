@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pic %}
 {% block title %}Webinars{% endblock %}
 
 {# The join button, or a note about when it appears. A webinar only has a start time, so the join link is shown from
@@ -45,7 +46,7 @@
         <ul class="wb-people">
             {% for p in w.speakers %}
             <li>
-                {% if p.photo %}<img src="{{ asset(p.photo) }}" alt="">{% else %}<span class="wb-initials" aria-hidden="true">{{ p.name[:1] }}</span>{% endif %}
+                {% if p.photo %}{{ pic(asset(p.photo), '', p.photo_style, 'mini') }}{% else %}<span class="wb-initials" aria-hidden="true">{{ p.name[:1] }}</span>{% endif %}
                 <span>{% if p.slug %}<a href="{{ url_for('instructor_profile', slug=p.slug) }}"><b>{{ p.name }}</b></a>{% else %}<b>{{ p.name }}</b>{% endif %}{% if p.role %}<small>{{ p.role }}</small>{% endif %}</span>
             </li>
             {% endfor %}
@@ -81,7 +82,8 @@
             <div class="wb-feature-main">{{ body(w) }}</div>
             <aside class="wb-feature-side">
                 <div class="wb-cover-wrap">
-                    <div class="wb-cover"><img src="{{ asset(w.cover) }}" alt=""></div>
+                    {% set cs = imgstyle(w.cover_style, 'cover') %}
+                    <div class="wb-cover"{% if cs.frame %} style="{{ cs.frame }}"{% endif %}><img src="{{ asset(w.cover) }}" alt=""{% if cs.img %} style="{{ cs.img }}"{% endif %}></div>
                     {% if w.start %}<div class="hs-date" aria-hidden="true"><span>{{ w.month_short }}</span><b>{{ w.day }}</b><span>{{ w.weekday_short }}</span></div>{% endif %}
                 </div>
                 <div class="wb-panel">

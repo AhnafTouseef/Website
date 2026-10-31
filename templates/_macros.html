@@ -15,3 +15,23 @@
 <span class="course-price {{ size }}">{{ course.price }}</span>
 {% endif %}
 {% endmacro %}
+
+
+{# A person's photo. Without a saved picture style it is the plain <img> (the page CSS styles it, exactly as before).
+   With one, the picture sits in a frame (border, corners, shadow, custom CSS) and fit/focus/zoom go on the <img>.
+   base = profile | card | mini: which stock frame to start from. #}
+{% macro pic(src, alt, raw, base, cls='') %}
+{% set st = imgstyle(raw, 'photo') %}
+{% if st.active %}<span class="px px-{{ base }}" style="{{ st.frame }}"><img class="px-img" src="{{ src }}" alt="{{ alt }}"{% if st.img %} style="{{ st.img }}"{% endif %}></span>{% else %}<img{% if cls %} class="{{ cls }}"{% endif %} src="{{ src }}" alt="{{ alt }}">{% endif %}
+{% endmacro %}
+
+
+{# A person's photo for the Our team page and the home teaser. The container is the frame, so the picture style set in the
+   admin (border, corners, shadow, fit, focus, zoom, custom CSS) applies here exactly as on the profile page.
+   Import this macro "with context" (it uses asset()). Without a photo it shows the person's initials. #}
+{% macro person_photo(p, cls) %}
+{% set st = imgstyle(p.photo_style, 'photo') %}
+<div class="{{ cls }}"{% if st.frame %} style="{{ st.frame }}"{% endif %}>
+    {% if p.photo %}<img src="{{ asset(p.photo) }}" alt="{{ p.name }}" loading="lazy"{% if st.img %} style="{{ st.img }}"{% endif %}>{% else %}<span class="tm-initials" aria-hidden="true">{{ p.name|initials }}</span>{% endif %}
+</div>
+{% endmacro %}

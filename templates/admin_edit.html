@@ -1,9 +1,10 @@
 {% extends "admin_base.html" %}
+{% from "_admin_macros.html" import img_style_panel %}
 {% block title %}{{ 'new course' if creating else slug }}{% endblock %}
 {% block content %}
 <div class="a-title">
     <h1>{% if creating %}new course{% else %}edit {{ slug }}{% endif %}</h1>
-    <span class="sub">{% if creating %}creates static/course/&lt;folder&gt;/ with meta.json + curriculum.csv{% else %}static/course/{{ slug }}/{% endif %}</span>
+    <span class="sub">{% if creating %}creates content/course/&lt;folder&gt;/ with meta.json + curriculum.csv{% else %}content/course/{{ slug }}/{% endif %}</span>
     <div class="right">
         <a class="a-btn" href="{{ url_for('admin.dashboard') }}">← back</a>
         {% if public_visible %}<a class="a-btn" href="{{ url_for('course_details', slug=slug) }}" target="_blank" rel="noopener">view public page ↗</a>{% endif %}
@@ -128,7 +129,7 @@
         </section>
 
         <section class="panel">
-            <header><b>instructors</b><span>pick from static/instructors/ · saved by name in <code>instructors</code></span></header>
+            <header><b>instructors</b><span>pick from content/instructors/ · saved by name in <code>instructors</code></span></header>
             <div class="body">
                 {% if instructors or extra_instructors %}
                 <div class="people">
@@ -140,7 +141,7 @@
                     {% endfor %}
                 </div>
                 {% else %}
-                <div class="dim">no instructor folders yet. Add static/instructors/&lt;name&gt;/profile.json + photo.jpg.</div>
+                <div class="dim">no instructor folders yet. Add content/instructors/&lt;name&gt;/profile.json + photo.jpg.</div>
                 {% endif %}
                 <div class="help" style="margin-top:.4rem">Order on the course page follows each instructor’s own <code>order</code> value.</div>
             </div>
@@ -174,7 +175,7 @@
                 <input type="file" name="thumbnail" id="f-thumb" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
                 <div class="uploader" id="uploader" data-state="{{ 'current' if thumb else 'empty' }}">
                     <div class="up-frame" id="up-frame" tabindex="0" role="button" aria-label="Thumbnail: click to choose an image, or drop one here">
-                        <img id="up-img" alt="Thumbnail preview" {% if thumb %}src="{{ url_for('static', filename=thumb) }}?t={{ range(1, 10**9)|random }}" data-current-src="{{ url_for('static', filename=thumb) }}?t={{ range(1, 10**9)|random }}"{% else %}hidden{% endif %}>
+                        <img id="up-img" alt="Thumbnail preview" {% if thumb %}src="{{ url_for('media', filename=thumb) }}?t={{ range(1, 10**9)|random }}" data-current-src="{{ url_for('media', filename=thumb) }}?t={{ range(1, 10**9)|random }}"{% else %}hidden{% endif %}>
                         <div class="up-empty" id="up-empty">
                             <div class="up-icon" aria-hidden="true">🖼</div>
                             <div><b>Drop an image here</b></div>
@@ -187,6 +188,7 @@
                     </div>
                     <div class="up-status" id="up-status" role="status" aria-live="polite"></div>
                 </div>
+                {{ img_style_panel('thumb', form.thumb_style, 'thumb', (asset(thumb) if thumb else ''), '#f-thumb') }}
             </div>
         </section>
 
@@ -230,6 +232,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset('js/admin_imgstyle.js') }}"></script>
 <script>
 (function () {
     var form = document.getElementById('editor');
@@ -324,6 +327,8 @@
         meta.order = isNaN(order) ? 100 : order;
         meta.added = val('added');
         meta.published = !!form.elements['published'].checked;
+        var ts = window.imgStyleDiff && window.imgStyleDiff('thumb');
+        if (ts) meta.thumb_style = ts;
         jsonBox.innerHTML = highlight(JSON.stringify(meta, null, 4));
     }
 

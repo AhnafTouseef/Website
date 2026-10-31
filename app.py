@@ -1,5 +1,5 @@
 from flask import (Flask, Blueprint, render_template, request, redirect, url_for,
-                   flash, abort, session, jsonify, Response, send_file)
+                   flash, abort, session, jsonify, Response, send_file, send_from_directory)
 from markupsafe import Markup, escape
 import csv
 import difflib
@@ -31,6 +31,21 @@ from email.utils import parsedate_to_datetime
 from importlib import metadata
 
 app = Flask(__name__)
+
+# ---------------------------------------------------------------------------
+# Name. LEGACY: this project began as "Belajar.id" (its original working name, still the name of
+# the old export manifest and of old zips, which the importer keeps accepting). The public brand
+# is SITE_NAME: change it here, or with the SITE_NAME environment variable, and every page follows.
+# ---------------------------------------------------------------------------
+LEGACY_NAMES = ("belajar", "Belajar.id")
+SITE_NAME = os.environ.get("SITE_NAME", "").strip() or "Skillwaves"
+
+# ---------------------------------------------------------------------------
+# Folders. static/ holds the site's skeleton only (static/css, static/js). Everything that is
+# content (courses, instructors, webinars, pictures, logos) lives in content/ and is served
+# at /media/. Old installs that still keep content in static/ are moved over at start-up.
+# ---------------------------------------------------------------------------
+CONTENT_DIR = os.path.join(app.root_path, "content")
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -69,15 +84,54 @@ class _LogBook(logging.Handler):
             return list(reversed(list(self.entries.values())))
 
 
-log = logging.getLogger("belajar")
+log = logging.getLogger("skillwaves")
 log.setLevel(logging.INFO)
 log.propagate = False
 _logbook = _LogBook()
 log.addHandler(_logbook)
 _console = logging.StreamHandler()
 _console.setLevel(logging.WARNING)
-_console.setFormatter(logging.Formatter("%(levelname)s [belajar] %(message)s"))
+_console.setFormatter(logging.Formatter("%(levelname)s [skillwaves] %(message)s"))
 log.addHandler(_console)
+
+
+LEGACY_CONTENT_NAMES = ("course", "instructors", "webinars", "images", "logo", "webinar.jpg")
+
+
+def _migrate_legacy_layout():
+    """Old layout: content inside static/. Move it into content/ once (nothing is overwritten or deleted)."""
+    old_root = app.static_folder
+    moved = []
+    os.makedirs(CONTENT_DIR, exist_ok=True)
+    for name in LEGACY_CONTENT_NAMES:
+        src = os.path.join(old_root, name)
+        if not os.path.lexists(src) or os.path.islink(src):
+            continue
+        dst = os.path.join(CONTENT_DIR, name)
+        try:
+            os.makedirs(CONTENT_DIR, exist_ok=True)
+            if os.path.isdir(src):
+                os.makedirs(dst, exist_ok=True)
+                for entry in sorted(os.listdir(src)):
+                    target = os.path.join(dst, entry)
+                    if os.path.lexists(target):
+                        if entry != ".gitkeep":
+                            log.warning("Legacy layout: static/%s/%s was left where it is because content/%s/%s already exists", name, entry, name, entry)
+                        continue
+                    shutil.move(os.path.join(src, entry), target)
+                    moved.append(f"{name}/{entry}")
+                if not os.listdir(src) or os.listdir(src) == [".gitkeep"]:
+                    shutil.rmtree(src)
+            elif not os.path.lexists(dst):
+                shutil.move(src, dst)
+                moved.append(name)
+        except OSError as exc:
+            log.warning("Legacy layout: could not move static/%s into content/ (%s)", name, exc)
+    if moved:
+        log.warning("Legacy layout: moved %d item(s) from static/ to content/ (static/ now holds css and js only)", len(moved))
+
+
+_migrate_legacy_layout()
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +203,7 @@ faq_questions = [
     {"question": "What if I fall behind?", "answer": "We offer support through our community and Q&A sessions, plus recordings so you can review lessons at any time."},
     {"question": "Is there a refund policy?", "answer": "Yes. We offer a refund window for early sign-ups. Contact us directly if you need help and we will respond quickly."},
     {"question": "Will you expand to other cities or do offline classes?", "answer": "We are focused on online delivery for now, but we plan to explore local meetups and hybrid formats as we grow."},
-    {"question": "How is this different from free YouTube tutorials?", "answer": "Belajar.id is cohort-based, mentor-led, and project-focused. You get guided learning, community accountability, and real feedback."},
+    {"question": "How is this different from free YouTube tutorials?", "answer": f"{SITE_NAME} is cohort-based, mentor-led, and project-focused. You get guided learning, community accountability, and real feedback."},
     {"question": "Can I pay in installments?", "answer": "We are working on installment options and will share details with early registrants. Reach out if you are interested."}
 ]
 
@@ -157,27 +211,27 @@ faq_questions = [
 # ---------------------------------------------------------------------------
 # Folder-based content loading
 #
-#   static/course/<course-folder>/meta.json        course details
-#   static/course/<course-folder>/curriculum.csv   week,topic rows
-#   static/course/<course-folder>/thumbnail.<ext>  course image
-#   static/instructors/<person-folder>/profile.json   name, role, bio, order
-#   static/instructors/<person-folder>/photo.<ext>    profile image
+#   content/course/<course-folder>/meta.json        course details
+#   content/course/<course-folder>/curriculum.csv   week,topic rows
+#   content/course/<course-folder>/thumbnail.<ext>  course image
+#   content/instructors/<person-folder>/profile.json   name, role, bio, order
+#   content/instructors/<person-folder>/photo.<ext>    profile image
 #
 # Everything is read on each request, so adding or editing a folder shows up
 # on the next page refresh without restarting the server.
 # ---------------------------------------------------------------------------
 
 def _courses_dir():
-    return os.path.join(app.static_folder, "course")
+    return os.path.join(CONTENT_DIR, "course")
 
 
 def _instructors_dir():
-    return os.path.join(app.static_folder, "instructors")
+    return os.path.join(CONTENT_DIR, "instructors")
 
 
 def _trash_dir():
-    # Outside static/ on purpose, so deleted courses are not downloadable from the website.
-    return os.path.join(os.path.dirname(app.static_folder), "_trash")
+    # Outside content/ on purpose, so deleted courses are not downloadable from the website.
+    return os.path.join(app.root_path, "_trash")
 
 
 def _subfolders(root):
@@ -260,6 +314,10 @@ def _int(value, default=100):
 
 def _is_false(value):
     return value is False or _text(value).lower() in ("false", "no", "0", "off")
+
+
+def _is_true(value):
+    return value is True or _text(value).lower() in ("true", "yes", "1", "on")
 
 
 def _norm(name):
@@ -388,7 +446,7 @@ def assign_tints(course_list):
 
 
 # ---------------------------------------------------------------------------
-# Instructor profiles: static/instructors/<folder>/profile.json (+ photo.<ext>, cv.pdf)
+# Instructor profiles: content/instructors/<folder>/profile.json (+ photo.<ext>, cv.pdf)
 #
 # Only name is really needed. Everything else is optional and a section is simply not shown
 # on the public profile page when it is empty (a fresh graduate has no job experience, and
@@ -410,7 +468,7 @@ SOCIAL_SUGGESTIONS = ["LinkedIn", "GitHub", "Facebook", "Instagram", "X (Twitter
                       "WhatsApp", "Google Scholar", "ResearchGate", "Behance", "Medium", "Portfolio"]
 PROFILE_KEYS = ["name", "role", "bio", "biography", "teaching_approach", "location", "email", "phone",
                 "website", "socials", "expertise", "languages", "education", "experience",
-                "certifications", "achievements", "sections", "order", "published"]
+                "certifications", "achievements", "sections", "order", "published", "founder", "photo_style"]
 CV_NAME = "cv.pdf"
 
 
@@ -481,8 +539,10 @@ def _instructor_view(folder, data, path):
         "biography": _text(data.get("biography")),
         "teaching_approach": _text(data.get("teaching_approach")),
         "photo": f"instructors/{folder}/{photo}" if photo else None,
+        "photo_style": data.get("photo_style"),
         "order": _int(data.get("order")),
         "published": not _is_false(data.get("published", True)),
+        "founder": _is_true(data.get("founder")),
         "location": _text(data.get("location")),
         "email": email if EMAIL_RE.match(email) else "",
         "phone": phone if PHONE_RE.match(phone) else "",
@@ -662,7 +722,7 @@ def load_courses():
             if person is None and _norm(name) in hidden:
                 continue                  # a hidden instructor is not shown anywhere on the public site
             if person is None:
-                log.warning("Course '%s' lists instructor '%s' but no matching folder in static/instructors", folder, name)
+                log.warning("Course '%s' lists instructor '%s' but no matching folder in content/instructors", folder, name)
                 person = {"slug": None, "name": name, "role": "", "bio": "", "photo": None, "order": 100}
             team.append(person)
 
@@ -694,6 +754,7 @@ def load_courses():
             "instructors": team,
             "curriculum": _load_curriculum(os.path.join(path, "curriculum.csv")),
             "thumbnail": f"course/{folder}/{thumb}" if thumb else None,
+            "thumb_style": meta.get("thumb_style"),
             "order": _int(meta.get("order")),
             "added": added_label,
             "added_ts": added_ts,
@@ -725,7 +786,7 @@ TIME_HTTP_TIMEOUT = 6
 
 
 def _http_open(url, method="GET"):
-    request_ = urllib.request.Request(url, method=method, headers={"User-Agent": "belajar-site/1.0"})
+    request_ = urllib.request.Request(url, method=method, headers={"User-Agent": "skillwaves-site/1.0"})
     return urllib.request.urlopen(request_, timeout=TIME_HTTP_TIMEOUT)
 
 
@@ -854,12 +915,29 @@ def _start_clock():
 # ---------------------------------------------------------------------------
 
 def asset_url(filename):
-    url = url_for("static", filename=filename)
+    """URL of a site file: css/ and js/ come from static/, everything else from content/ (served at /media/)."""
+    code = filename.startswith(("css/", "js/"))
+    url = url_for("static" if code else "media", filename=filename)
     try:
-        stamp = int(os.stat(os.path.join(app.static_folder, filename)).st_mtime)
+        stamp = int(os.stat(os.path.join(app.static_folder if code else CONTENT_DIR, filename)).st_mtime)
     except OSError:
         return url
     return f"{url}?v={stamp}"
+
+
+MEDIA_HIDDEN_NAMES = {"curriculum.csv"}
+MEDIA_HIDDEN_EXTS = {".json"}
+
+
+@app.route("/media/<path:filename>")
+def media(filename):
+    """Public pictures, logos, CVs and other files from content/. The data files that describe the
+    content (.json, curriculum.csv) and anything starting with a dot are never served."""
+    name = os.path.basename(filename)
+    if (name.startswith(".") or any(seg.startswith(".") for seg in filename.split("/"))
+            or name.lower() in MEDIA_HIDDEN_NAMES or os.path.splitext(name)[1].lower() in MEDIA_HIDDEN_EXTS):
+        abort(404)
+    return send_from_directory(CONTENT_DIR, filename)
 
 
 @app.after_request
@@ -868,7 +946,7 @@ def _svg_headers(response):
     if request.path.lower().endswith(".svg"):
         response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
         response.headers["X-Content-Type-Options"] = "nosniff"
-    elif request.path.startswith("/static/"):
+    elif request.path.startswith(("/static/", "/media/")):
         response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
@@ -876,8 +954,8 @@ def _svg_headers(response):
 # ---------------------------------------------------------------------------
 # Webinars
 #
-#   static/webinars/<folder>/webinar.json   title, date, time, links, agenda, ...
-#   static/webinars/<folder>/cover.<ext>    optional picture (static/webinar.jpg when missing)
+#   content/webinars/<folder>/webinar.json   title, date, time, links, agenda, ...
+#   content/webinars/<folder>/cover.<ext>    optional picture (content/webinar.jpg when missing)
 #
 # A webinar only has a START time: nobody knows beforehand how long it will run. So
 #   upcoming  = before the start time (the join link is NOT shown yet)
@@ -888,13 +966,13 @@ def _svg_headers(response):
 
 WEBINAR_DEFAULT_COVER = "webinar.jpg"
 WEBINAR_KEYS = ["title", "subtitle", "description", "date", "time", "platform", "join_link", "rsvp_link",
-                "capacity", "agenda", "speakers", "courses", "published"]
+                "capacity", "agenda", "speakers", "courses", "published", "cover_style"]
 TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
 HERO_WEBINARS = 3                 # most webinar slides shown in the home slider (after the brand slide)
 
 
 def _webinars_dir():
-    return os.path.join(app.static_folder, "webinars")
+    return os.path.join(CONTENT_DIR, "webinars")
 
 
 def _webinar_start(date_text, time_text):
@@ -981,6 +1059,7 @@ def _webinar_view(folder, data, path, now, lookups):
         "speakers": speakers,
         "courses": linked,
         "cover": f"webinars/{folder}/{cover}" if cover else WEBINAR_DEFAULT_COVER,
+        "cover_style": data.get("cover_style"),
         "has_cover": bool(cover),
         "published": not _is_false(data.get("published", True)),
     }
@@ -1025,9 +1104,9 @@ def webinars_for_course(slug, webinars):
 # ---------------------------------------------------------------------------
 # Branding: logo files, the home slider's brand slide, and how they are aligned and scaled.
 #
-#   static/logo/branding.json          the settings (written by the admin "branding" page)
-#   static/logo/<file>                 header / footer logos (png, jpg, webp, gif or svg)
-#   static/images/brand-slide.<ext>    the brand slide picture (static/webinar.jpg until one is uploaded)
+#   content/logo/branding.json          the settings (written by the admin "branding" page)
+#   content/logo/<file>                 header / footer logos (png, jpg, webp, gif or svg)
+#   content/images/brand-slide.<ext>    the brand slide picture (content/webinar.jpg until one is uploaded)
 # ---------------------------------------------------------------------------
 
 BRAND_FILE = "branding.json"
@@ -1055,11 +1134,11 @@ BRAND_LIMITS = {"height": (16, 160), "height_mobile": (12, 120), "x": (0, 100), 
 
 
 def _logo_dir():
-    return os.path.join(app.static_folder, "logo")
+    return os.path.join(CONTENT_DIR, "logo")
 
 
 def _images_dir():
-    return os.path.join(app.static_folder, "images")
+    return os.path.join(CONTENT_DIR, "images")
 
 
 def _logo_files():
@@ -1083,6 +1162,192 @@ def _choice(value, options, default):
     return value if value in options else default
 
 
+# ---------------------------------------------------------------------------
+# Image style: the same controls for every photo on the site (course thumbnail, instructor photo,
+# webinar cover, logos, hero picture). A style is a small dict saved next to the picture's other settings;
+# only what differs from the default is ever written, and a picture without a style looks exactly as before.
+# ---------------------------------------------------------------------------
+
+IMG_FITS = ("cover", "contain")
+IMG_BSTYLES = ("none", "solid", "dashed", "dotted", "double")
+IMG_SHADOWS = ("none", "soft", "strong", "glow")
+IMG_RMODES = ("default", "custom", "circle")
+IMG_LIMITS = {"x": (0, 100), "y": (0, 100), "zoom": (100, 300), "bw": (0, 20), "radius": (0, 80)}
+IMG_CSS_MAX = 600
+IMG_CSS_DECLS = 20
+IMG_PARTS = {                    # which groups of controls make sense for each kind of picture
+    "thumb": ("fit", "focus", "zoom", "border", "css"),       # course cards keep one shape, so no corners/shadow
+    "photo": ("fit", "focus", "zoom", "border", "radius", "shadow", "css"),
+    "cover": ("fit", "focus", "zoom", "border", "radius", "shadow", "css"),
+    "logo": ("border", "radius", "shadow", "css"),
+    "slide": ("border", "shadow", "css"),                      # the hero picture has its own shape control
+}
+IMG_FOCUS = {"photo": (50, 0)}   # instructor photos have always been cropped from the top
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+_CSS_PROP = re.compile(r"^-?[a-z][a-z0-9-]*$")
+_CSS_VALUE = re.compile(r"^[A-Za-z0-9\s.,%#()+\-*/!_]+$")
+_CSS_BAD_CHARS = re.compile(r"[{}<>\\@`\x00-\x08\x0b-\x1f]")
+_CSS_BAD_WORDS = ("url(", "image-set(", "expression(", "javascript:", "vbscript:", "data:", "-moz-binding", "behavior",
+                  "attr(", "element(", "paint(", "image(", "cross-fade(", "/*", "*/", "src(", "env(")
+_CSS_BAD_PROPS = {"content", "behavior", "-moz-binding", "cursor", "list-style-image", "mask-image", "border-image-source",
+                  "background-image", "filter-url"}
+
+
+def img_defaults(kind):
+    x, y = IMG_FOCUS.get(kind, (50, 50))
+    return {"fit": "cover", "x": x, "y": y, "zoom": 100, "bstyle": "none", "bw": 2, "bcolor": "#f59e0b",
+            "rmode": "default", "radius": 16, "shadow": "none", "css": ""}
+
+
+def _img_int(value, key, default):
+    low, high = IMG_LIMITS[key]
+    try:
+        return max(low, min(high, int(float(value))))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def clean_custom_css(text):
+    """(clean declarations, error). Only `property: value;` lines are accepted, so the text can restyle the picture
+    but cannot open a rule, load anything from elsewhere or cover the page."""
+    text = (text or "").replace("\r", "").strip()
+    if not text:
+        return "", None
+    if len(text) > IMG_CSS_MAX:
+        return None, f"the custom CSS is longer than {IMG_CSS_MAX} characters."
+    if _CSS_BAD_CHARS.search(text):
+        return None, "the custom CSS may only contain plain 'property: value;' lines (no braces, @rules, backslashes or tags)."
+    squeezed = re.sub(r"\s+", "", text.lower())
+    for word in _CSS_BAD_WORDS:
+        if word in squeezed:
+            return None, f"the custom CSS may not use '{word.rstrip('(:')}' (nothing can be loaded from elsewhere)."
+    out = []
+    for raw in re.split(r"[;\n]+", text):
+        decl = raw.strip()
+        if not decl:
+            continue
+        if ":" not in decl:
+            return None, f"'{decl[:40]}' is not a 'property: value' pair."
+        prop, _, value = decl.partition(":")
+        prop, value = prop.strip().lower(), re.sub(r"\s+", " ", value.strip())
+        if not _CSS_PROP.match(prop):
+            return None, f"'{prop[:40]}' is not a valid CSS property name."
+        if not value or not _CSS_VALUE.match(value):
+            return None, f"the value of '{prop}' contains characters that are not allowed."
+        if prop in _CSS_BAD_PROPS:
+            return None, f"'{prop}' is not allowed here."
+        low = value.lower()
+        if prop == "position" and low.split()[0] not in ("static", "relative"):
+            return None, "'position' may only be static or relative (the picture must stay where it is)."
+        if prop == "z-index":
+            try:
+                if not -1 <= int(low) <= 10:
+                    raise ValueError
+            except ValueError:
+                return None, "'z-index' must be a whole number from -1 to 10."
+        out.append(f"{prop}: {value}")
+    if len(out) > IMG_CSS_DECLS:
+        return None, f"use at most {IMG_CSS_DECLS} CSS lines."
+    return "; ".join(out) + ";" if out else "", None
+
+
+def clean_img_style(raw, kind):
+    """A full, valid style for this kind of picture. Anything missing, unknown or out of range falls back to the default."""
+    d = img_defaults(kind)
+    raw = raw if isinstance(raw, dict) else {}
+    parts = IMG_PARTS[kind]
+    out = dict(d)
+    if "fit" in parts:
+        out["fit"] = _choice(raw.get("fit"), IMG_FITS, d["fit"])
+    if "focus" in parts:
+        out["x"], out["y"] = _img_int(raw.get("x", d["x"]), "x", d["x"]), _img_int(raw.get("y", d["y"]), "y", d["y"])
+    if "zoom" in parts:
+        out["zoom"] = _img_int(raw.get("zoom", d["zoom"]), "zoom", d["zoom"])
+    if "border" in parts:
+        out["bstyle"] = _choice(raw.get("bstyle"), IMG_BSTYLES, d["bstyle"])
+        out["bw"] = _img_int(raw.get("bw", d["bw"]), "bw", d["bw"])
+        color = _text(raw.get("bcolor"))
+        out["bcolor"] = color.lower() if _HEX_COLOR.match(color) else d["bcolor"]
+    if "radius" in parts:
+        out["rmode"] = _choice(raw.get("rmode"), IMG_RMODES, d["rmode"])
+        out["radius"] = _img_int(raw.get("radius", d["radius"]), "radius", d["radius"])
+    if "shadow" in parts:
+        out["shadow"] = _choice(raw.get("shadow"), IMG_SHADOWS, d["shadow"])
+        if out["shadow"] == "glow" and "border" not in parts:
+            out["shadow"] = "soft"
+        color = _text(raw.get("bcolor"))
+        if "border" not in parts and _HEX_COLOR.match(color):
+            out["bcolor"] = color.lower()
+    if "css" in parts:
+        css, err = clean_custom_css(_text(raw.get("css")))
+        out["css"] = css if err is None else ""          # a stored value that is not valid any more is simply ignored
+    return out
+
+
+def img_css(style, kind):
+    """{'active', 'frame', 'img'}: inline CSS for the frame around the picture (border, corners, shadow, custom lines)
+    and for the <img> itself (fit, focus, zoom). `active` is False when nothing differs from the default."""
+    d = img_defaults(kind)
+    frame, img = [], []
+    if style["bstyle"] != "none" and style["bw"] > 0:
+        frame.append(f"border: {style['bw']}px {style['bstyle']} {style['bcolor']}")
+    if style["rmode"] == "custom":
+        frame.append(f"border-radius: {style['radius']}px")
+    elif style["rmode"] == "circle":
+        frame.append("border-radius: 50%")
+    shadow = {"soft": "0 6px 18px rgba(0, 0, 0, 0.28)", "strong": "0 16px 44px rgba(0, 0, 0, 0.5)",
+              "glow": f"0 0 26px {style['bcolor']}"}.get(style["shadow"])
+    if shadow:
+        frame.append(f"box-shadow: {shadow}")
+    if style["css"]:
+        frame.append(style["css"].rstrip(";"))
+    moved = (style["fit"], style["x"], style["y"], style["zoom"]) != (d["fit"], d["x"], d["y"], d["zoom"])
+    if moved:
+        img.append(f"object-fit: {style['fit']}")
+        img.append(f"object-position: {style['x']}% {style['y']}%")
+        if style["zoom"] != 100:
+            img.append(f"transform: scale({style['zoom'] / 100:.2f})")
+            img.append(f"transform-origin: {style['x']}% {style['y']}%")
+    return {"active": bool(frame or img), "frame": "; ".join(frame) + (";" if frame else ""),
+            "img": "; ".join(img) + (";" if img else ""), "moved": moved}
+
+
+def read_img_style(form, prefix, kind, errors, label):
+    """Style from submitted form fields named <prefix>_fit, <prefix>_x ... Problems are appended to `errors`."""
+    raw = {k: form.get(f"{prefix}_{k}") for k in ("fit", "x", "y", "zoom", "bstyle", "bw", "bcolor", "rmode", "radius", "shadow", "css")}
+    raw = {k: v for k, v in raw.items() if v is not None}
+    if "css" in raw:
+        _, why = clean_custom_css(raw["css"])
+        if why:
+            errors.append(f"{label}: {why}")
+            style = clean_img_style(raw, kind)
+            if "css" in IMG_PARTS[kind]:
+                style["css"] = raw["css"][:IMG_CSS_MAX]        # shown again in the form so it can be corrected; never stored
+            return style
+    return clean_img_style(raw, kind)
+
+
+def store_img_style(data, key, style, kind):
+    """Write the style into a JSON dict under `key` (only what differs from the default) or remove the key."""
+    d = img_defaults(kind)
+    keep = {k: v for k, v in style.items() if v != d[k]}
+    if keep:
+        data[key] = keep
+    else:
+        data.pop(key, None)
+
+
+@app.template_global("imgstyle")
+def _imgstyle(raw, kind):
+    return img_css(clean_img_style(raw, kind), kind)
+
+
+app.add_template_global(img_defaults, "img_defaults")
+app.add_template_global(lambda kind: IMG_PARTS[kind], "img_parts")
+app.add_template_global(IMG_LIMITS, "img_limits")
+app.add_template_global(IMG_CSS_MAX, "img_css_max")
+
+
 def clean_branding(raw):
     """Settings as stored/used: unknown keys dropped, numbers clamped, choices checked."""
     raw = raw if isinstance(raw, dict) else {}
@@ -1095,6 +1360,7 @@ def clean_branding(raw):
             "height": _clamp(src.get("height", dflt["height"]), "height", dflt["height"]),
             "height_mobile": _clamp(src.get("height_mobile", dflt["height_mobile"]), "height_mobile", dflt["height_mobile"]),
             "align": _choice(src.get("align"), BRAND_ALIGN, dflt["align"]),
+            "img": clean_img_style(src.get("img"), "logo"),
         }
     footer_src = raw.get("footer") if isinstance(raw.get("footer"), dict) else {}
     out["footer"]["style"] = _choice(footer_src.get("style"), FOOTER_STYLES, "plain")
@@ -1113,6 +1379,7 @@ def clean_branding(raw):
     for key in ("badge", "headline", "highlight", "text", "primary_label", "secondary_label"):
         slide[key] = _text(src.get(key)) if key in src else dflt[key]
     slide["headline"] = slide["headline"] or dflt["headline"]          # the slide always needs a headline
+    slide["img"] = clean_img_style(src.get("img"), "slide")
     out["slide"] = slide
     return out
 
@@ -1137,26 +1404,31 @@ def load_branding():
     files = _logo_files()
     header_file = brand["header"]["logo"] if brand["header"]["logo"] in files else (random.choice(files) if files else None)
     footer_file = brand["footer"]["logo"] if brand["footer"]["logo"] in files else header_file
-    brand["header"].update(file=header_file, url=asset_url("logo/" + header_file) if header_file else None)
-    brand["footer"].update(file=footer_file, url=asset_url("logo/" + footer_file) if footer_file else None)
+    brand["header"].update(file=header_file, url=asset_url("logo/" + header_file) if header_file else None,
+                           css=img_css(brand["header"]["img"], "logo")["frame"])
+    brand["footer"].update(file=footer_file, url=asset_url("logo/" + footer_file) if footer_file else None,
+                           css=img_css(brand["footer"]["img"], "logo")["frame"])
     slide = brand["slide"]
     own = _find_image(_images_dir(), "brand-slide")
-    image = f"images/{own}" if own else (WEBINAR_DEFAULT_COVER if os.path.isfile(os.path.join(app.static_folder, WEBINAR_DEFAULT_COVER)) else None)
+    image = f"images/{own}" if own else (WEBINAR_DEFAULT_COVER if os.path.isfile(os.path.join(CONTENT_DIR, WEBINAR_DEFAULT_COVER)) else None)
     slide.update(image=image, image_url=asset_url(image) if image else None, custom_image=bool(own),
-                 css_ratio=SLIDE_RATIOS[slide["ratio"]], headline_parts=_headline_parts(slide["headline"], slide["highlight"]))
+                 css_ratio=SLIDE_RATIOS[slide["ratio"]], frame_css=img_css(slide["img"], "slide")["frame"], headline_parts=_headline_parts(slide["headline"], slide["highlight"]))
     return brand
 
 
 @app.context_processor
 def site_context():
-    return {"brand": load_branding(), "asset": asset_url}
+    return {"brand": load_branding(), "asset": asset_url, "site_name": SITE_NAME}
 
 
 @app.route("/")
 def home():
     webinars = [w for w in load_webinars() if w["start"]][:HERO_WEBINARS]
+    people = load_instructors()
     return render_template(
         "home.html",
+        founders=[p for p in people if p["founder"]],
+        instructor_count=len(people),
         featured_courses=newest_courses(load_courses(), 2),
         pipeline_courses=pipeline_courses,
         hero_webinars=webinars,
@@ -1202,9 +1474,21 @@ def webinar():
     items = load_webinars()
     return render_template("webinar.html", featured=(items[0] if items else None), later=items[1:])
 
+@app.route("/team")
+def team():
+    """Our team: founding members (ticked "founder" in the admin) first, every other instructor below."""
+    people = load_instructors()
+    founders = [p for p in people if p["founder"]]
+    others = assign_tints([p for p in people if not p["founder"]])
+    course_count = len(load_courses())
+    return render_template("team.html", founders=founders, instructors=others,
+                           people_count=len(people), course_count=course_count)
+
+
 @app.route("/about")
 def about():
-    return render_template("about.html", team_members=load_instructors())
+    """The old About page address: kept so existing links keep working."""
+    return redirect(url_for("team"), code=301)
 
 @app.route("/faq", methods=["GET", "POST"])
 def faq():
@@ -1241,7 +1525,7 @@ TRASH_RE = re.compile(r"^(?P<slug>[^/\\\x00]+?)__(?P<ts>\d{8}-\d{6})(?:-\d+)?$")
 STRING_KEYS = ["title", "tagline", "subtitle", "description", "duration", "capacity",
                "certificate", "price", "start_date", "enroll_link", "webinar_link"]
 LIST_KEYS = ["features", "what_you_will_learn", "instructors"]
-META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published"]
+META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published", "thumb_style"]
 
 ADMIN_IDLE_SECONDS = 8 * 3600
 UPLOAD_LIMIT = 5 * 1024 * 1024
@@ -1468,7 +1752,7 @@ def _slug_error(slug):
 
 
 def _course_path(slug):
-    """Absolute path of an existing course folder, or 404. Refuses anything that could escape static/course."""
+    """Absolute path of an existing course folder, or 404. Refuses anything that could escape content/course."""
     root = _courses_dir()
     if (not slug or slug in (".", "..") or slug.startswith((".", "_"))
             or slug != os.path.basename(slug) or "\\" in slug or "\x00" in slug):
@@ -1596,7 +1880,7 @@ def scan_courses():
             add("info", "no instructors listed")
         for name in names:
             if index.get(_norm(name)) is None:
-                add("warn", f"instructor '{name}' has no matching profile in static/instructors")
+                add("warn", f"instructor '{name}' has no matching profile in content/instructors")
 
         csv_path = os.path.join(path, "curriculum.csv")
         csv_text = _read_text(csv_path)
@@ -1684,7 +1968,7 @@ def _trash_items():
                 else "file" if slug.startswith(TRASH_FILE_PREFIX) else "course")
         if kind == "file":
             origin, _ = _read_json_checked(os.path.join(path, "origin.json"))
-            title = "static/" + _text((origin or {}).get("path"))
+            title = "content/" + _text((origin or {}).get("path"))
             slug = _text((origin or {}).get("path"))
         elif kind == "instructor":
             slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
@@ -2230,7 +2514,8 @@ def system():
         "OS": platform.platform(),
         "Debug mode": "ON" if app.debug else "off",
         "Project folder": app.root_path,
-        "Static folder": app.static_folder,
+        "Static folder (css, js)": app.static_folder,
+        "Content folder": CONTENT_DIR,
         "Courses folder": _courses_dir(),
         "Instructors folder": _instructors_dir(),
         "Webinars folder": _webinars_dir(),
@@ -2264,6 +2549,7 @@ def _form_from_meta(meta, csv_text, slug, added=""):
         "order": str(meta.get("order", "")) if isinstance(meta.get("order", ""), int) else _text(meta.get("order")),
         "published": not _is_false(meta.get("published", True)) if meta else False,
         "csv": csv_text,
+        "thumb_style": clean_img_style(meta.get("thumb_style"), "thumb"),
     }
 
 
@@ -2287,6 +2573,7 @@ def _read_submission(creating, existing_meta, added_default):
         "published": f.get("published") == "on",
         "csv": f.get("curriculum_csv", ""),
     }
+    form["thumb_style"] = read_img_style(f, "thumb", "thumb", errors, "Thumbnail")
 
     if creating:
         err = _slug_error(form["slug"])
@@ -2353,6 +2640,7 @@ def _read_submission(creating, existing_meta, added_default):
     else:
         meta.pop("discount", None)
     meta["published"] = form["published"]
+    store_img_style(meta, "thumb_style", form["thumb_style"], "thumb")
     return form, {
         "slug": form["slug"],
         "meta": meta,
@@ -2469,7 +2757,7 @@ def trash_restore(name):
         _fb_restore(os.path.join(src, "payload"), target)
         shutil.rmtree(src, ignore_errors=True)
         log.info("admin: restored '/%s' from the trash", "/".join(parts))
-        flash(f"Restored static/{'/'.join(parts)}." , "success")
+        flash(f"Restored content/{'/'.join(parts)}." , "success")
         return redirect(url_for("admin.files", path="/".join(parts[:-1])))
     kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
             else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
@@ -2613,7 +2901,7 @@ def scan_instructors():
         used_in = _courses_using(view["name"]) if not err else []
         entries.append({
             "slug": folder, "status": status, "name": view["name"], "role": view["role"], "photo": view["photo"],
-            "order": view["order"], "cv": bool(view["cv"]), "checks": checks,
+            "founder": view["founder"], "order": view["order"], "cv": bool(view["cv"]), "checks": checks,
             "filled": sum(1 for _, ok in checks if ok), "total": len(checks),
             "used_in": used_in, "issues": issues,
             "n_error": sum(1 for i in issues if i["level"] == "error"),
@@ -2684,8 +2972,10 @@ def _instructor_form_from_data(data, slug, order=""):
         form[key] = _text(data.get(key))
     form["order"] = str(data["order"]) if isinstance(data.get("order"), int) else (str(order) if order != "" else _text(data.get("order")))
     form["published"] = (not _is_false(data.get("published", True))) if data else False
+    form["founder"] = _is_true(data.get("founder"))
     form["expertise"] = "\n".join(_text_list(data.get("expertise")))
     form["languages"] = "\n".join(_text_list(data.get("languages")))
+    form["photo_style"] = clean_img_style(data.get("photo_style"), "photo")
     socials = data.get("socials")
     if isinstance(socials, dict):
         socials = [{"platform": k, "url": v} for k, v in socials.items()]
@@ -2710,8 +3000,10 @@ def _read_instructor_submission(creating, existing, own_slug):
     for key in ("name", "role", "bio", "biography", "teaching_approach", "location", "email", "phone", "website", "order"):
         form[key] = f.get(key, "").strip()
     form["published"] = f.get("published") == "on"
+    form["founder"] = f.get("founder") == "on"
     form["expertise"] = f.get("expertise", "")
     form["languages"] = f.get("languages", "")
+    form["photo_style"] = read_img_style(f, "photo", "photo", errors, "Photo")
 
     def cap(label, text, limit):
         if len(text) > limit:
@@ -2836,6 +3128,11 @@ def _read_instructor_submission(creating, existing, own_slug):
             profile.pop(key, None)
     profile["order"] = order if order is not None else 100
     profile["published"] = form["published"]
+    if form["founder"]:
+        profile["founder"] = True
+    else:
+        profile.pop("founder", None)
+    store_img_style(profile, "photo_style", form["photo_style"], "photo")
     return form, {
         "profile": profile, "slug": form["slug"], "photo": photo, "cv": cv,
         "remove_photo": f.get("remove_photo") == "on", "remove_cv": f.get("remove_cv") == "on",
@@ -3064,6 +3361,7 @@ def _webinar_form_from_data(data, slug):
         "agenda": agenda,
         "speakers": _text_list(data.get("speakers")), "courses": _text_list(data.get("courses")),
         "published": not _is_false(data.get("published", True)) if data else False,
+        "cover_style": clean_img_style(data.get("cover_style"), "cover"),
     }
 
 
@@ -3079,6 +3377,7 @@ def _read_webinar_submission(creating, existing):
         "courses": [s.strip() for s in f.getlist("courses") if s.strip()],
         "published": f.get("published") == "on",
     }
+    form["cover_style"] = read_img_style(f, "cover", "cover", errors, "Cover picture")
     if creating:
         problem = _slug_error(form["slug"])
         if problem:
@@ -3133,6 +3432,7 @@ def _read_webinar_submission(creating, existing):
     if form["courses"]:
         out["courses"] = form["courses"]
     out["published"] = form["published"]
+    store_img_style(out, "cover_style", form["cover_style"], "cover")
     return form, {"data": out, "slug": form["slug"], "cover": cover, "remove_cover": f.get("remove_cover") == "on"}, []
 
 
@@ -3340,6 +3640,7 @@ def _read_branding_submission():
         box["align"] = f.get(f"{part}_align", "")
         if box["align"] not in BRAND_ALIGN:
             errors.append(f"{label} logo alignment is not valid.")
+        box["img"] = read_img_style(f, f"{part}_img", "logo", errors, f"{label} logo")
     settings["footer"]["style"] = f.get("footer_style", "")
     if settings["footer"]["style"] not in FOOTER_STYLES:
         errors.append("Footer logo style is not valid.")
@@ -3353,6 +3654,7 @@ def _read_branding_submission():
         if slide[key] not in options:
             errors.append(f"{label} is not valid.")
     slide["tilt"] = f.get("slide_tilt") == "on"
+    slide["img"] = read_img_style(f, "slide_img", "slide", errors, "Slide picture")
     for key, limit in (("badge", 80), ("headline", 120), ("highlight", 60), ("text", 600), ("primary_label", 40), ("secondary_label", 40)):
         slide[key] = f.get(f"slide_{key}", "").strip()
         if len(slide[key]) > limit:
@@ -3409,12 +3711,12 @@ def branding():
 # ===========================================================================
 # Admin: file browser and content transfer (export / import)
 #
-# The file browser works inside static/ only. Code (static/css) and everything outside
-# static/ (app.py, templates, the password and key files) cannot be reached from it.
+# The file browser works inside content/ only. Code (static/css, static/js) and everything outside
+# content/ (app.py, templates, the password and key files) cannot be reached from it.
 # Deleting moves things to _trash/ (restorable); nothing here deletes for good.
 # ===========================================================================
 
-FB_HIDDEN_TOP = {"css", "js"}                                   # code, not content
+FB_HIDDEN_TOP = {"css", "js"}                                  # reserved: these names belong to static/ (code), never listed, exported or imported from content/
 FB_ROLE_ROOTS = {"course": ("course", "admin.course_edit"),
                  "instructors": ("instructor", "admin.instructor_edit"),
                  "webinars": ("webinar", "admin.webinar_edit")}
@@ -3495,7 +3797,7 @@ def _fb_check_name(name):
 
 
 def _fb_parts(rel, allow_empty=True):
-    """Clean list of path segments for a path relative to static/. Anything unsafe is refused."""
+    """Clean list of path segments for a path relative to content/. Anything unsafe is refused."""
     rel = (rel or "").strip()
     if "\\" in rel or "\x00" in rel:
         raise FBError("Invalid path.")
@@ -3514,7 +3816,7 @@ def _fb_parts(rel, allow_empty=True):
 
 def _fb_abs(parts, must_exist=False):
     """Absolute path for clean segments. A symbolic link anywhere on the way is refused."""
-    root = os.path.realpath(app.static_folder)
+    root = os.path.realpath(CONTENT_DIR)
     path = os.path.join(root, *parts) if parts else root
     if os.path.realpath(path) != os.path.normpath(path):
         raise FBError("Invalid path.", 403)
@@ -3617,7 +3919,7 @@ def _fb_entry(parent, entry):
         out["ext"] = ext
         out["kind"] = _fb_kind(ext)
         out["size"] = st.st_size
-        out["url"] = url_for("static", filename=rel)
+        out["url"] = url_for("media", filename=rel)
         out["text"] = ext in FB_TEXT_EXTS and st.st_size <= FB_EDIT_LIMIT
         out["allowed"] = ext in FB_ALLOWED_EXTS
     return out
@@ -3804,7 +4106,7 @@ def _zip_scan(zf):
 
 
 def _zip_extract(zf, members, base_parts, policy, budget):
-    """Write each member under static/<base_parts>/<its segments>. policy: skip | replace | rename."""
+    """Write each member under content/<base_parts>/<its segments>. policy: skip | replace | rename."""
     st = {"written": 0, "replaced": 0, "renamed": 0, "kept": 0, "bytes": 0, "skipped": []}
     for info, segs in members:
         label = "/".join(segs)
@@ -3908,7 +4210,7 @@ def files_list():
     entries, truncated = [], False
     if q:
         for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
-            rel = os.path.relpath(dirpath, os.path.realpath(app.static_folder)).replace(os.sep, "/")
+            rel = os.path.relpath(dirpath, os.path.realpath(CONTENT_DIR)).replace(os.sep, "/")
             here = [] if rel == "." else rel.split("/")
             dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not (not here and d in FB_HIDDEN_TOP))
             try:
@@ -3973,7 +4275,7 @@ def files_props():
                     pass
         out.update(size=size, files=files_n, folders=folders_n)
     else:
-        out.update(size=st.st_size, url=url_for("static", filename="/".join(parts)), type=_fb_ext(parts[-1]) or "file")
+        out.update(size=st.st_size, url=url_for("media", filename="/".join(parts)), type=_fb_ext(parts[-1]) or "file")
     return out
 
 
@@ -4332,7 +4634,7 @@ def _temp_download(path, name, mimetype="application/zip"):
 
 
 def _zip_response(items, name):
-    fd, tmp = tempfile.mkstemp(prefix="belajar-zip-", suffix=".zip")
+    fd, tmp = tempfile.mkstemp(prefix="skillwaves-zip-", suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -4356,9 +4658,9 @@ def files_zip():
         items = _fb_zip_items(parts_list)
     except FBError as exc:
         abort(400, exc.message)
-    name = (parts_list[0][-1] if len(parts_list) == 1 else "belajar-files") + ".zip"
+    name = (parts_list[0][-1] if len(parts_list) == 1 else "skillwaves-files") + ".zip"
     if len(parts_list) > 1:
-        name = f"belajar-files-{datetime.now().strftime('%Y%m%d-%H%M')}.zip"
+        name = f"skillwaves-files-{datetime.now().strftime('%Y%m%d-%H%M')}.zip"
     return _zip_response(items, name)
 
 
@@ -4367,29 +4669,31 @@ def files_zip():
 # (the code travels through git; the content never does)
 # ===========================================================================
 
-TRANSFER_MANIFEST = "belajar-export.json"
+TRANSFER_MANIFEST = "skillwaves-export.json"
+LEGACY_TRANSFER_MANIFEST = "belajar-export.json"      # exports made before the rename
+TRANSFER_ROOTS = ("content", "static")                # "static" = zips made by the old layout
 TRANSFER_PARTS = [
     ("courses", "Courses", "course"),
     ("instructors", "Instructors", "instructors"),
     ("webinars", "Webinars", "webinars"),
     ("images", "Images", "images"),
     ("branding", "Logos and branding settings", "logo"),
-    ("other", "Other files in static/ (default webinar picture, anything you added yourself)", None),
+    ("other", "Other files in content/ (default webinar picture, anything you added yourself)", None),
 ]
 _TRANSFER_BY_FOLDER = {folder: pid for pid, _, folder in TRANSFER_PARTS if folder}
 TRANSFER_IDS = [p[0] for p in TRANSFER_PARTS]
 
 
 def _transfer_part_of(rel_segs):
-    """Which export part a path under static/ belongs to (None for code that is never exported)."""
+    """Which export part a path under content/ belongs to."""
     if not rel_segs or rel_segs[0] in FB_HIDDEN_TOP:
         return None
     return _TRANSFER_BY_FOLDER.get(rel_segs[0], "other") if len(rel_segs) > 1 or rel_segs[0] in _TRANSFER_BY_FOLDER else "other"
 
 
 def _transfer_walk():
-    """(absolute path, segments under static/, size) for every exportable file."""
-    root = os.path.realpath(app.static_folder)
+    """(absolute path, segments under content/, size) for every exportable file."""
+    root = os.path.realpath(CONTENT_DIR)
     for dirpath, dirnames, names in os.walk(root, followlinks=False):
         rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
         here = [] if rel == "." else rel.split("/")
@@ -4417,7 +4721,7 @@ def _transfer_stats():
 
 
 def _import_dir():
-    return os.path.join(os.path.dirname(app.static_folder), "_import")
+    return os.path.join(app.root_path, "_import")
 
 
 def _import_clean_old():
@@ -4453,20 +4757,21 @@ def _import_analyse(zpath):
         if err:
             return None, err
         manifest = None
-        if TRANSFER_MANIFEST in zf.namelist():
+        manifest_name = next((n for n in (TRANSFER_MANIFEST, LEGACY_TRANSFER_MANIFEST) if n in zf.namelist()), None)
+        if manifest_name:
             try:
-                manifest = json.loads(zf.read(TRANSFER_MANIFEST).decode("utf-8-sig"))
+                manifest = json.loads(zf.read(manifest_name).decode("utf-8-sig"))
             except (ValueError, UnicodeDecodeError, KeyError):
                 return None, "The export information inside the zip is damaged."
-            if not isinstance(manifest, dict) or manifest.get("app") != "belajar" or manifest.get("format") != 1:
+            if not isinstance(manifest, dict) or manifest.get("app") not in ("skillwaves", "belajar") or manifest.get("format") != 1:
                 return None, "This zip was not made by this site's Export (or is from an incompatible version)."
         parts = {pid: {"files": 0, "size": 0, "existing": 0} for pid in TRANSFER_IDS}
         usable, odd = [], []
         for info, segs in members:
-            if segs[0] != "static" or len(segs) < 2:
-                if segs == [TRANSFER_MANIFEST]:
+            if segs[0] not in TRANSFER_ROOTS or len(segs) < 2:
+                if segs in ([TRANSFER_MANIFEST], [LEGACY_TRANSFER_MANIFEST]):
                     continue
-                odd.append(("/".join(segs), "it is not inside a static/ folder"))
+                odd.append(("/".join(segs), "it is not inside a content/ folder"))
                 continue
             rel = segs[1:]
             pid = _transfer_part_of(rel)
@@ -4506,12 +4811,12 @@ def transfer_export():
     for full, segs, size in _transfer_walk():
         pid = _transfer_part_of(segs)
         if pid in counts:
-            items.append((full, "static/" + "/".join(segs)))
+            items.append((full, "content/" + "/".join(segs)))
             counts[pid] += 1
     stamp = datetime.now().strftime("%Y%m%d-%H%M")
-    manifest = {"app": "belajar", "format": 1, "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    manifest = {"app": "skillwaves", "format": 1, "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "parts": chosen, "files": counts}
-    fd, tmp = tempfile.mkstemp(prefix="belajar-export-", suffix=".zip")
+    fd, tmp = tempfile.mkstemp(prefix="skillwaves-export-", suffix=".zip")
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -4522,7 +4827,7 @@ def transfer_export():
         os.unlink(tmp)
         raise
     log.info("admin: exported %d file(s) (%s)", len(items), ", ".join(chosen))
-    return _temp_download(tmp, f"belajar-content-{stamp}.zip")
+    return _temp_download(tmp, f"skillwaves-content-{stamp}.zip")
 
 
 @admin_bp.post("/transfer/import/upload")
@@ -4567,7 +4872,7 @@ def transfer_import_apply(token):
             return redirect(url_for("admin.transfer"))
         wanted = []
         for info, segs in members:
-            if segs[0] == "static" and len(segs) > 1 and _transfer_part_of(segs[1:]) in chosen:
+            if segs[0] in TRANSFER_ROOTS and len(segs) > 1 and _transfer_part_of(segs[1:]) in chosen:
                 wanted.append((info, segs[1:]))
         if mode == "replace":
             # the current content of the chosen parts goes to the trash first, so nothing is lost for good

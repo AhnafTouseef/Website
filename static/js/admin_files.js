@@ -237,7 +237,7 @@
             a.addEventListener('click', function (e) { e.preventDefault(); go(path); });
             crumbsEl.appendChild(a);
         }
-        crumb('static', '');
+        crumb('content', '');
         parts.forEach(function (p) {
             acc = join(acc, p);
             crumbsEl.appendChild(el('span', 'fb-sep', '/'));
@@ -480,7 +480,7 @@
         api('text?path=' + enc(e.path)).then(function (d) {
             if (!d.ok) { toast(d.error, 'error'); return; }
             editing = { path: e.path, mtime: d.mtime, clean: d.text };
-            $('#fb-edit-name').textContent = 'static/' + e.path;
+            $('#fb-edit-name').textContent = 'content/' + e.path;
             etext.value = d.text;
             estate.textContent = '';
             emsg.textContent = '';
@@ -656,7 +656,7 @@
             var dl = el('dl', 'fb-props');
             function row(k, v) { dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, v)); }
             row('name', d.name);
-            row('location', 'static/' + d.path);
+            row('location', 'content/' + d.path);
             if (d.dir) { row('contains', d.files + ' file(s), ' + d.folders + ' folder(s)'); row('total size', size(d.size)); }
             else { row('size', size(d.size) + ' (' + d.size.toLocaleString() + ' bytes)'); row('type', d.type); }
             row('modified', when(d.mtime));
@@ -830,7 +830,7 @@
         rootRow.dataset.path = '';
         rootRow.dataset.drop = '1';
         rootRow.appendChild(el('span', 'fb-tw', '▾'));
-        rootRow.appendChild(el('span', 'fb-node-name', 'static'));
+        rootRow.appendChild(el('span', 'fb-node-name', 'content'));
         treeEl.appendChild(rootRow);
         var kids = el('div', 'fb-kids');
         treeEl.appendChild(kids);
@@ -864,7 +864,7 @@
 
     /* ---------- drag and drop ---------- */
 
-    var DRAG = 'application/x-belajar-paths';
+    var DRAG = 'application/x-skillwaves-paths';
     var dragging = null;
 
     listEl.addEventListener('dragstart', function (e) {

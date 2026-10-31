@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-{% from "_macros.html" import price_block %}
+{% from "_macros.html" import price_block, pic %}
 {% macro curriculum_sheet(sheet) %}
 <div class="section-header">
     <h2>Curriculum</h2>
@@ -46,9 +46,10 @@
             </div>
         </div>
         <div class="hero-visual course-hero-media">
-            <div class="course-media-card thumb-frame">
+            {% set ts = imgstyle(course.thumb_style, 'thumb') %}
+            <div class="course-media-card thumb-frame"{% if ts.frame %} style="{{ ts.frame }}"{% endif %}>
                 {% if course.thumbnail %}
-                <img src="{{ url_for('static', filename=course.thumbnail) }}" alt="{{ course.title }}">
+                <img src="{{ url_for('media', filename=course.thumbnail) }}" alt="{{ course.title }}"{% if ts.img %} style="{{ ts.img }}"{% endif %}>
                 {% endif %}
             </div>
         </div>
@@ -75,11 +76,11 @@
         <div class="section-header">
             <h2>Your Instructors</h2>
         </div>
-        <div class="team-grid">
+        <div class="team-grid{{ ' cards-2' if course.instructors|length > 1 }}">
             {% for member in course.instructors %}
             {% if member.slug %}<a class="team-card" href="{{ url_for('instructor_profile', slug=member.slug) }}">{% else %}<div class="team-card">{% endif %}
                 {% if member.photo %}
-                <img class="instructor-photo" src="{{ url_for('static', filename=member.photo) }}" alt="{{ member.name }}">
+                {{ pic(url_for('media', filename=member.photo), member.name, member.photo_style, 'card', 'instructor-photo') }}
                 {% endif %}
                 <h3>{{ member.name }}</h3>
                 {% if member.role %}<p class="team-role">{{ member.role }}</p>{% endif %}

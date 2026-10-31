@@ -1,24 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{ person.name }} · Instructor{% endblock %}
 {% block content %}
+{% from "_macros.html" import pic %}
 <section class="profile-hero">
     <div class="container profile-hero-grid">
         <div class="profile-photo">
             {% if person.photo %}
-            <img src="{{ url_for('static', filename=person.photo) }}" alt="{{ person.name }}">
+            {{ pic(url_for('media', filename=person.photo), person.name, person.photo_style, 'profile') }}
             {% else %}
             <div class="profile-initials" aria-hidden="true">{{ person.name|initials }}</div>
             {% endif %}
         </div>
         <div class="profile-head">
-            <p class="section-label">Instructor</p>
+            <p class="section-label">{{ 'Founding member' if person.founder else 'Instructor' }}</p>
             <h1>{{ person.name }}</h1>
             {% if person.role %}<p class="profile-role">{{ person.role }}</p>{% endif %}
             {% if person.location %}<p class="profile-meta">📍 {{ person.location }}</p>{% endif %}
             {% if person.bio %}<p class="profile-lead">{{ person.bio }}</p>{% endif %}
             {% if person.cv or person.email %}
             <div class="profile-actions">
-                {% if person.cv %}<a class="button button-primary" href="{{ url_for('static', filename=person.cv) }}" target="_blank" rel="noopener">View CV (PDF)</a>{% endif %}
+                {% if person.cv %}<a class="button button-primary" href="{{ url_for('media', filename=person.cv) }}" target="_blank" rel="noopener">View CV (PDF)</a>{% endif %}
                 {% if person.email %}<a class="button button-outline" href="mailto:{{ person.email }}">Email</a>{% endif %}
             </div>
             {% endif %}
@@ -132,7 +133,7 @@
                 {% if person.phone %}<li><span>Phone</span><a href="tel:{{ person.phone_link }}">{{ person.phone }}</a></li>{% endif %}
                 {% if person.website %}<li><span>Website</span><a href="{{ person.website }}" target="_blank" rel="noopener noreferrer">{{ person.website|replace('https://', '')|replace('http://', '')|trim('/') }}</a></li>{% endif %}
                 {% for s in person.socials %}<li><span>{{ s.platform }}</span><a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.url|replace('https://', '')|replace('http://', '')|replace('www.', '')|trim('/') }}</a></li>{% endfor %}
-                {% if person.cv %}<li><span>CV</span><a href="{{ url_for('static', filename=person.cv) }}" target="_blank" rel="noopener">PDF · {{ person.cv_size|filesize }}</a></li>{% endif %}
+                {% if person.cv %}<li><span>CV</span><a href="{{ url_for('media', filename=person.cv) }}" target="_blank" rel="noopener">PDF · {{ person.cv_size|filesize }}</a></li>{% endif %}
             </ul>
         </div>
         {% endif %}
@@ -144,7 +145,7 @@
     <div class="section-header">
         <h2>Courses with {{ person.name.split()[0] }}</h2>
     </div>
-    <div class="course-grid">
+    <div class="course-grid{{ ' cards-2' if courses|length > 1 }}">
         {% for course in courses %}
         {% include "_course_card.html" %}
         {% endfor %}

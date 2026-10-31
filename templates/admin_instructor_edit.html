@@ -1,10 +1,10 @@
 {% extends "admin_base.html" %}
-{% from "_admin_macros.html" import repeater %}
+{% from "_admin_macros.html" import repeater, img_style_panel %}
 {% block title %}{{ 'new instructor' if creating else slug }}{% endblock %}
 {% block content %}
 <div class="a-title">
     <h1>{% if creating %}new instructor{% else %}edit {{ slug }}{% endif %}</h1>
-    <span class="sub">{% if creating %}creates static/instructors/&lt;folder&gt;/ with profile.json{% else %}static/instructors/{{ slug }}/{% endif %}</span>
+    <span class="sub">{% if creating %}creates content/instructors/&lt;folder&gt;/ with profile.json{% else %}content/instructors/{{ slug }}/{% endif %}</span>
     <div class="right">
         <a class="a-btn" href="{{ url_for('admin.instructors_list') }}">← back</a>
         {% if public_visible %}<a class="a-btn" href="{{ url_for('instructor_profile', slug=slug) }}" target="_blank" rel="noopener">view public profile ↗</a>{% endif %}
@@ -94,6 +94,11 @@
                     <label class="chk"><input type="checkbox" name="published" {% if form.published %}checked{% endif %}> <b>published</b></label>
                     <div class="help">unticked = hidden everywhere on the public site (a draft)</div>
                 </div>
+                <div class="field">
+                    <label class="l">founding member</label>
+                    <label class="chk"><input type="checkbox" name="founder" {% if form.founder %}checked{% endif %}> <b>founder / co-founder</b></label>
+                    <div class="help">ticked = shown in the “Founding members” section at the top of the Our team page (and on the home page)</div>
+                </div>
             </div>
         </section>
 
@@ -104,7 +109,7 @@
                 <input type="file" name="photo" id="f-photo" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
                 <div class="uploader square" id="ph-uploader" data-state="{{ 'current' if photo else 'empty' }}">
                     <div class="up-frame" id="ph-frame" tabindex="0" role="button" aria-label="Photo: click to choose an image, or drop one here">
-                        <img id="ph-img" alt="Photo preview" {% if photo %}src="{{ url_for('static', filename=photo) }}?t={{ range(1, 10**9)|random }}" data-current-src="{{ url_for('static', filename=photo) }}?t={{ range(1, 10**9)|random }}"{% else %}hidden{% endif %}>
+                        <img id="ph-img" alt="Photo preview" {% if photo %}src="{{ url_for('media', filename=photo) }}?t={{ range(1, 10**9)|random }}" data-current-src="{{ url_for('media', filename=photo) }}?t={{ range(1, 10**9)|random }}"{% else %}hidden{% endif %}>
                         <div class="up-empty">
                             <div class="up-icon" aria-hidden="true">🙂</div>
                             <div><b>Drop a photo here</b></div>
@@ -117,6 +122,7 @@
                     </div>
                     <div class="up-status" id="ph-status" role="status" aria-live="polite"></div>
                 </div>
+                {{ img_style_panel('photo', form.photo_style, 'photo', (asset(photo) if photo else ''), '#f-photo') }}
             </div>
         </section>
 
@@ -171,7 +177,7 @@
                     <div class="cv-line cv-current">
                         <span class="cv-ico" aria-hidden="true">📄</span>
                         <span><b>cv.pdf</b> <span class="dim">· {{ cv_size|filesize }}</span></span>
-                        {% if cv %}<a class="a-btn small" href="{{ url_for('static', filename=cv) }}" target="_blank" rel="noopener">open ↗</a>{% endif %}
+                        {% if cv %}<a class="a-btn small" href="{{ url_for('media', filename=cv) }}" target="_blank" rel="noopener">open ↗</a>{% endif %}
                         <button type="button" class="a-btn small" id="cv-replace">replace</button>
                         <button type="button" class="a-btn small danger" id="cv-remove">✕ remove</button>
                     </div>
@@ -279,6 +285,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset('js/admin_imgstyle.js') }}"></script>
 <script>
 (function () {
     var form = document.getElementById('editor');
@@ -328,6 +335,7 @@
         var order = parseInt(val('order'), 10);
         p.order = isNaN(order) ? 100 : order;
         p.published = !!form.elements['published'].checked;
+        if (form.elements['founder'].checked) p.founder = true;
         return p;
     }
     function renderChecks(p) {
@@ -346,6 +354,8 @@
     }
     function refresh() {
         var p = collect();
+        var ps = window.imgStyleDiff && window.imgStyleDiff('photo');
+        if (ps) p.photo_style = ps;
         document.getElementById('json-preview').innerHTML = highlight(JSON.stringify(p, null, 4));
         renderChecks(p);
         var note = document.getElementById('rename-note');

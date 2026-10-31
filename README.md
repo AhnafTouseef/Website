@@ -1,6 +1,37 @@
-# Belajar.id Flask Website
+# Skillwaves Flask Website
 
-A Flask-based frontend for the Belajar.id learning platform.
+A Flask-based site and admin console for the Skillwaves learning platform.
+
+> **Legacy name:** this project started as **Belajar.id** (its original working name). The public name is now
+> `SITE_NAME` in `app.py` (`Skillwaves`), also settable with the `SITE_NAME` environment variable, and every page,
+> title, logo text and admin label follows it. The old name survives only where it must: in the code comment above
+> `SITE_NAME`, and in the importer, which still accepts content zips made before the rename (`belajar-export.json`
+> manifest, `static/` paths).
+
+## Folders
+
+| Folder | What lives there |
+|---|---|
+| `static/css`, `static/js` | the site's skeleton: the only things in `static/` |
+| `content/` | everything dynamic: `course/`, `instructors/`, `webinars/`, `images/`, `logo/` and the default `webinar.jpg`. Served to visitors at `/media/...` (the data files `.json` and `curriculum.csv`, and anything starting with a dot, are never served) |
+| `templates/` | page templates |
+| `_trash/`, `_import/` | soft-deleted items and staged imports (created when needed, never served) |
+
+An older install that still keeps its content inside `static/` is moved into `content/` automatically the first
+time the new version starts (nothing is overwritten or deleted; a warning in the terminal says what moved).
+
+## Our team page (`/team`)
+
+The old About page is now **Our team** (`/about` redirects to it). Two sections, both built from the instructor records:
+
+- **Founding members** (top, dark navy and gold): everyone ticked **founder / co-founder** in the instructor editor
+  (`"founder": true` in `profile.json`), ordered by the `order` field. Each card shows photo, role, location, short
+  description, up to four expertise tags, social links, CV link and a profile button.
+- **Instructors** (below): every other published instructor as a course-style card (photo, name, role, short
+  description, up to three tags, *View profile*).
+
+If nobody is ticked as founder, the founding section is left out and everyone appears under Instructors. The home
+page teaser shows the same founders. The picture style set for an instructor photo applies on every page.
 
 ## Run locally
 
@@ -19,23 +50,53 @@ Every course thumbnail is shown in a fixed **16:9** frame and cropped to fill it
 
 Home page: the **2 newest** courses appear as compact side-by-side cards; with only 1 course it becomes a single card spanning the whole section. The Courses page gives each card a stable, random-looking pastel background (picked from the course folder name, from the palette `CARD_TINTS` in `app.py`).
 
+## Phone layout: cards in two columns
+
+On phones (640px and narrower) every card grid runs in **two columns**: course cards (Courses, home, instructor profile), instructor and founder cards and the values on Our team, and the instructors on a course page. The templates mark those grids with the class `cards-2`, and the compact sizes live in the last block of `static/css/responsive.css`. A grid with a single card keeps the full width, and tablets and desktops are unchanged.
+
 ## Desktop scale
 
 On screens 1024px and wider, everything below the banner and the nav bar is shown at 80% (like 80% browser zoom: text, images, spacing). To change it, edit `--site-zoom` in the last block of `static/css/main.css` (`0.8` now; `1` turns it off). Phones and tablets are not affected. The admin console has its own stylesheet and is not scaled.
 
-## Moving to another server (git for code, zip for content)
+## Picture style (every place a photo is set)
 
-Courses, instructors, webinars, images and logos are your data, not code, so `.gitignore` keeps them out of the repository (the five folders under `static/` are kept empty with a `.gitkeep`). A normal `git push` therefore carries only the code. The content moves through the admin **transfer** page:
+Course thumbnail, instructor photo, webinar cover, header logo, footer logo and the home brand-slide picture each have a
+collapsible **picture style** panel in the admin, right under the upload box, with a live preview. A picture that has no
+saved style looks exactly as it did before; only differences from the default are written to the JSON file
+(`thumb_style` in `meta.json`, `photo_style` in `profile.json`, `cover_style` in `webinar.json`, `img` inside
+`content/logo/branding.json`).
+
+| Control | Course thumbnail | Instructor photo / webinar cover | Logos | Brand slide picture |
+|---|---|---|---|---|
+| fit, focus (left/right, top/bottom), zoom | yes | yes | – | has its own (above the panel) |
+| border: style, width, colour | yes | yes | yes | yes |
+| corners (keep / custom px / circle) | – (cards keep their shape) | yes | yes | – (it has its own shape) |
+| shadow / glow (glow uses the border colour) | – | yes | yes | yes |
+| custom CSS | yes | yes | yes | yes |
+
+"none (as designed)" for border or shadow means *do not add one*; the page's own design stays. To remove a designed
+border or shadow, use custom CSS (`border: none;` / `box-shadow: none;`).
+
+**Custom CSS box** - for anything the controls do not cover. One `property: value;` per line, applied to the picture's
+frame (max 600 characters, 20 lines), for example `filter: grayscale(1);` or `opacity: 0.9;`. Refused, with a message
+naming the problem: selectors, braces, `@rules`, `url()`, `image-set()`, `expression()`, `javascript:`, `data:`, comments,
+`cursor`, `content`, background/mask/border images, `position` other than static/relative, and `z-index` outside -1..10.
+Nothing can be loaded from elsewhere and a picture cannot cover the page.
+
+## Moving to another server (zip for content)
+
+Courses, instructors, webinars, images and logos are your data, not code, and live in `content/`. The code can move
+by whatever means you use; the content moves through the admin **transfer** page:
 
 1. **Old server:** admin, *transfer*, tick the parts, *download the content zip* (images, PDFs and every file of every course, instructor and webinar, plus `branding.json`).
-2. **New server:** `git clone`, `pip install -r requirements.txt`, `python app.py` (a fresh admin password and secret key are generated; set your own with `ADMIN_PASSWORD` / `SECRET_KEY`).
+2. **New server:** put the code there, `pip install -r requirements.txt`, `python app.py` (a fresh admin password and secret key are generated; set your own with `ADMIN_PASSWORD` / `SECRET_KEY`).
 3. **New server:** admin, *transfer*, drop the zip on the import box. You see what it contains and how much already exists, then choose *add only what is new*, *add and overwrite* or *make this server match the zip* (which first moves the current content to the trash, so it is restorable).
 
-The zip never contains code, the admin password, the secret key, the trash or hidden files. It is checked while importing: only allowed file types, real file contents, no paths leaving `static/`, size and entry limits.
+The zip never contains code, the admin password, the secret key, the trash or hidden files. It is checked while importing: only allowed file types, real file contents, no paths leaving `content/`, size and entry limits.
 
 ## File browser
 
-Admin, *files*: a full file manager for everything under `static/` (the `css` and `js` code folders are not shown, and nothing outside `static/` can be reached).
+Admin, *files*: a full file manager for everything under `content/` (the code in `static/css` and `static/js` and everything outside `content/` cannot be reached).
 
 - Folder tree, breadcrumbs, list or thumbnail view, sort, search in the current folder and its sub-folders.
 - Upload files or whole folders (button or drag and drop, with progress), new folder, new text file, rename, copy, cut, paste, move by dragging (hold Ctrl to copy), properties with the public link.
@@ -54,7 +115,7 @@ Limits (environment variables): `MAX_UPLOAD_MB` (default 300, per upload batch o
 
 Courses, instructors and webinars are read from folders on every page load, so just add or edit files and refresh the browser.
 
-### Add a course: `static/course/<course-folder>/`
+### Add a course: `content/course/<course-folder>/`
 
 The folder name becomes the course URL (`/course/<course-folder>`), so use lowercase letters and hyphens.
 
@@ -112,7 +173,7 @@ Month 2,Project kickoff,26-Nov-2026,2,Plan your project
 - Sheets with up to 3 columns sit in the main column; wider sheets get the full page width and scroll sideways on phones.
 - If you edit it in Excel, save as **CSV UTF-8**, or skip this and upload the `.xlsx` in the admin console.
 
-### Add an instructor: `static/instructors/<person-folder>/`
+### Add an instructor: `content/instructors/<person-folder>/`
 
 | File | Purpose |
 |---|---|
@@ -149,7 +210,8 @@ Only `name` is needed. **Every other key is optional**, and a section is simply 
 - `bio` is the short text on cards; `biography` is the long text on the profile page `/instructor/<folder-name>`.
 - Links must be `http(s)` web addresses (`github.com/me` is turned into `https://github.com/me`). Anything else (`javascript:` etc.) is dropped. A bad email/phone is not shown.
 - `published: false` hides the instructor everywhere on the public site.
-- Courses pick instructors by `name` (case and extra spaces don't matter). Course pages and the About page link each instructor card to their profile page.
+- `founder: true` puts the person in the **Founding members** section of the Our team page and in the home page teaser (tickbox *founder / co-founder* in the admin editor). Leave it out for a normal instructor.
+- Courses pick instructors by `name` (case and extra spaces don't matter). Course pages and the Our team page link each instructor card to their profile page.
 
 Problems (bad JSON, unknown instructor name, missing curriculum) never crash the site; they are printed in the terminal where `python app.py` is running.
 
@@ -165,12 +227,12 @@ What it does:
 
 | Page | Purpose |
 |---|---|
-| courses | every folder in `static/course/` incl. hidden and broken ones; stats, health warnings, raw `meta.json` / `curriculum.csv`, file list; edit, publish/hide, duplicate, delete |
+| courses | every folder in `content/course/` incl. hidden and broken ones; stats, health warnings, raw `meta.json` / `curriculum.csv`, file list; edit, publish/hide, duplicate, delete |
 | + new / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; live `meta.json` preview; Ctrl+S to save |
 | instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
 | webinars | add, edit, hide and delete live sessions (see below) |
 | branding | logo, hero picture and hero text (see below) |
-| trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `static/`), restorable or deletable forever |
+| trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `content/`), restorable or deletable forever |
 | files | the file browser (below) |
 | transfer | export / import all content as one zip (below) |
 | system | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
@@ -185,7 +247,7 @@ What it does:
 
 ### Webinars section
 
-A webinar lives in `static/webinars/<folder>/webinar.json` (plus an optional `cover.jpg/png/webp/gif`; without one, `static/webinar.jpg` is used). You can create zero, one or many, from the admin or by hand.
+A webinar lives in `content/webinars/<folder>/webinar.json` (plus an optional `cover.jpg/png/webp/gif`; without one, `content/webinar.jpg` is used). You can create zero, one or many, from the admin or by hand.
 
 | Key | Meaning |
 |---|---|
@@ -217,10 +279,10 @@ The site never trusts the visitor's device clock. The server keeps its own clock
 
 ### Branding section
 
-Logo, hero picture and hero text are managed here, not in code. Settings are saved in `static/logo/branding.json`; if it is missing or damaged the defaults are used.
+Logo, hero picture and hero text are managed here, not in code. Settings are saved in `content/logo/branding.json`; if it is missing or damaged the defaults are used.
 
-- **Header logo** and **footer logo**: upload a PNG, JPG, WEBP, GIF or **SVG** (max 5 MB). Set the height (desktop and phone separately) and the alignment (left / center / right). The footer logo can also be shown plain, on a soft plate or on white (useful for dark logos), or left empty to reuse the header logo. Files are saved as `static/logo/header.<ext>` and `static/logo/footer.<ext>`; your own files in that folder are never touched. With no setting at all, the old behaviour (a logo picked from `static/logo/`) still applies.
-- **Hero picture** (`static/images/brand-slide.<ext>`, default `static/webinar.jpg`): fit (cover/contain), focus point (x / y), zoom (100 to 300%), shape (rounded / square / circle), ratio (3:2, 4:3, 16:9, 1:1, 4:5), side (left/right) and tilt. Every control has a live preview next to it.
+- **Header logo** and **footer logo**: upload a PNG, JPG, WEBP, GIF or **SVG** (max 5 MB). Set the height (desktop and phone separately) and the alignment (left / center / right). The footer logo can also be shown plain, on a soft plate or on white (useful for dark logos), or left empty to reuse the header logo. Files are saved as `content/logo/header.<ext>` and `content/logo/footer.<ext>`; your own files in that folder are never touched. With no setting at all, the old behaviour (a logo picked from `content/logo/`) still applies.
+- **Hero picture** (`content/images/brand-slide.<ext>`, default `content/webinar.jpg`): fit (cover/contain), focus point (x / y), zoom (100 to 300%), shape (rounded / square / circle), ratio (3:2, 4:3, 16:9, 1:1, 4:5), side (left/right) and tilt. Every control has a live preview next to it.
 - **Hero text**: badge, headline (with one highlighted word), paragraph and the two button labels. A blank headline falls back to the default.
 - Replaced images show up immediately (their URLs carry a version stamp, so browsers never keep the old one).
 - **SVG rules** (an SVG can carry code, so it is checked before saving): UTF-8 only, max 1 MB, must be a real `<svg>` with a `viewBox` (or width and height). Scripts, `foreignObject`, animation, `on...` handlers, external references, DOCTYPE/ENTITY and CSS `@import` / external `url()` are refused with the reason shown. Images embedded as `data:` (PNG/JPG/GIF/WEBP) are fine. SVGs are also served with a locked-down security header.

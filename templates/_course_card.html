@@ -1,11 +1,12 @@
 {# One course card. Include inside a loop that sets `course`: {% include "_course_card.html" %}
    Layout (vertical on the Courses page, compact horizontal on the home page) is decided by the grid around it. #}
 {% from "_macros.html" import price_block %}
+{% set ts = imgstyle(course.thumb_style, 'thumb') %}
 <article class="course-tile{% if course.discount %} on-sale{% endif %}"{% if course.tint %} style="--tint: {{ course.tint }}"{% endif %}>
     <div class="tile-media">
-        <a class="tile-thumb{% if not course.thumbnail %} empty{% endif %}" href="{{ url_for('course_details', slug=course.slug) }}" aria-label="{{ course.title }}" tabindex="-1">
+        <a class="tile-thumb{% if not course.thumbnail %} empty{% endif %}" href="{{ url_for('course_details', slug=course.slug) }}" aria-label="{{ course.title }}" tabindex="-1"{% if ts.frame %} style="{{ ts.frame }}"{% endif %}>
             {% if course.thumbnail %}
-            <img src="{{ url_for('static', filename=course.thumbnail) }}" alt="{{ course.title }}" loading="lazy">
+            <img src="{{ url_for('media', filename=course.thumbnail) }}" alt="{{ course.title }}" loading="lazy"{% if ts.img %} style="{{ ts.img }}"{% endif %}>
             {% endif %}
             <span class="tile-badge">{{ course.tagline or 'Now Available' }}</span>
             {% if course.discount %}<span class="tile-sale">{{ course.discount }}% OFF</span>{% endif %}

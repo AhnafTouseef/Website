@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>webinars</h1>
-    <span class="sub">{{ stats.total }} folder(s) in static/webinars/ · shown on the webinar page and in the home slider</span>
+    <span class="sub">{{ stats.total }} folder(s) in content/webinars/ · shown on the webinar page and in the home slider</span>
     <div class="right">
         <a class="a-btn primary" href="{{ url_for('admin.webinar_new') }}">+ add webinar</a>
     </div>
@@ -22,7 +22,7 @@
 </div>
 
 <section class="panel">
-    <header><b>static/webinars/</b><span>soonest first · click “inspect” for problems found</span></header>
+    <header><b>content/webinars/</b><span>soonest first · click “inspect” for problems found</span></header>
     {% if webinars %}
     <div class="scroll-x">
     <table class="t">
@@ -77,7 +77,7 @@
     </table>
     </div>
     {% else %}
-    <div class="empty">static/webinars/ has no folders yet, so the public webinar page says no webinar is planned. <a href="{{ url_for('admin.webinar_new') }}">Add the first webinar →</a></div>
+    <div class="empty">content/webinars/ has no folders yet, so the public webinar page says no webinar is planned. <a href="{{ url_for('admin.webinar_new') }}">Add the first webinar →</a></div>
     {% endif %}
 </section>
 {% endblock %}

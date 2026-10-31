@@ -1,10 +1,10 @@
 {% extends "admin_base.html" %}
-{% from "_admin_macros.html" import repeater %}
+{% from "_admin_macros.html" import repeater, img_style_panel %}
 {% block title %}{{ 'new webinar' if creating else slug }}{% endblock %}
 {% block content %}
 <div class="a-title">
     <h1>{% if creating %}new webinar{% else %}edit {{ slug }}{% endif %}</h1>
-    <span class="sub">{% if creating %}creates static/webinars/&lt;folder&gt;/ with webinar.json{% else %}static/webinars/{{ slug }}/{% endif %}</span>
+    <span class="sub">{% if creating %}creates content/webinars/&lt;folder&gt;/ with webinar.json{% else %}content/webinars/{{ slug }}/{% endif %}</span>
     <div class="right">
         <a class="a-btn" href="{{ url_for('admin.webinars_list') }}">← back</a>
         {% if not creating and form.published and not load_error %}<a class="a-btn" href="{{ url_for('webinar') }}#{{ slug }}" target="_blank" rel="noopener">view on site ↗</a>{% endif %}
@@ -144,6 +144,7 @@
                     </div>
                     <div class="up-status" id="cv-status" role="status" aria-live="polite"></div>
                 </div>
+                {{ img_style_panel('cover', form.cover_style, 'cover', asset(cover or default_cover), '#f-cover') }}
             </div>
         </section>
 
@@ -196,6 +197,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset('js/admin_imgstyle.js') }}"></script>
 <script>
 (function () {
     var form = document.getElementById('editor'), savebar = document.getElementById('savebar');

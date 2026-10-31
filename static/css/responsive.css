@@ -191,3 +191,60 @@
     .profile-photo img, .profile-initials { width: 150px; }
     .profile-body { grid-template-columns: 1fr; }
 }
+
+/* ---------- phones: every card grid runs in two columns ----------
+   Templates mark those grids with .cards-2 (only when there is more than
+   one card, so a lone card keeps the full width). Tablets are unchanged. */
+@media (max-width: 640px) {
+    .cards-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+
+    /* course cards */
+    .cards-2 .tile-body,
+    .cards-2.wide .tile-body { padding: 0.7rem 0.75rem 0.8rem; gap: 0.35rem; }
+    .cards-2 .tile-title,
+    .cards-2.wide .tile-title { font-size: 0.95rem; line-height: 1.25; }
+    .cards-2 .tile-sub,
+    .cards-2.wide .tile-sub { font-size: 0.8rem; -webkit-line-clamp: 2; }
+    .cards-2 .tile-meta,
+    .cards-2.wide .tile-meta { font-size: 0.72rem; }
+    .cards-2 .tile-foot,
+    .cards-2.wide .tile-foot { flex-direction: column; align-items: stretch; gap: 0.45rem; padding-top: 0.3rem; }
+    .cards-2 .tile-foot .button,
+    .cards-2.wide .tile-foot .button { width: 100%; padding: 0.5rem; font-size: 0.78rem; text-align: center; }
+    .cards-2 .course-price, .cards-2 .price-new,
+    .cards-2.wide .course-price, .cards-2.wide .price-new { font-size: 1.05rem; }
+    .cards-2 .tile-badge, .cards-2 .tile-sale,
+    .cards-2.wide .tile-badge, .cards-2.wide .tile-sale { font-size: 0.62rem; padding: 0.15rem 0.45rem; top: 0.4rem; }
+    .cards-2 .tile-badge, .cards-2.wide .tile-badge { left: 0.4rem; }
+    .cards-2 .tile-sale, .cards-2.wide .tile-sale { right: 0.4rem; }
+
+    /* instructor cards */
+    .cards-2 .person-photo { aspect-ratio: 1 / 1; }
+    .cards-2 .person-role { font-size: 0.75rem; margin: 0; }
+    .cards-2 .person-tags { display: none; }
+    .cards-2 .person-tile .tile-sub { -webkit-line-clamp: 3; }
+
+    /* founders (dark cards): photo on top, short text */
+    .tm-fgrid.cards-2 { gap: 0.75rem; }
+    .tm-fgrid.cards-2 .tm-fcard { grid-template-columns: 1fr; gap: 0.7rem; padding: 0.8rem; border-radius: 1.2rem; }
+    .tm-fgrid.cards-2 .tm-fphoto { width: 100%; border-radius: 0.9rem; }
+    .tm-fgrid.cards-2 .tm-frole { font-size: 0.64rem; letter-spacing: 0.1em; margin-bottom: 0.2rem; }
+    .tm-fgrid.cards-2 .tm-fname { font-size: 1.05rem; margin-bottom: 0.3rem; }
+    .tm-fgrid.cards-2 .tm-floc,
+    .tm-fgrid.cards-2 .tm-ftags,
+    .tm-fgrid.cards-2 .tm-flinks { display: none; }
+    .tm-fgrid.cards-2 .tm-fbio { font-size: 0.82rem; line-height: 1.5; -webkit-line-clamp: 4; margin-bottom: 0.7rem; }
+    .tm-fgrid.cards-2 .tm-fcta { width: 100%; margin-top: auto; padding: 0.5rem; font-size: 0.78rem; text-align: center; }
+
+    /* values and "Your instructors" cards */
+    .values-grid.cards-2 .value-card { padding: 1rem; border-radius: 1.1rem; }
+    .values-grid.cards-2 .value-icon { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .values-grid.cards-2 .value-card h4 { font-size: 0.95rem; }
+    .values-grid.cards-2 .value-card p { font-size: 0.82rem; line-height: 1.5; }
+    .values-grid.cards-2 .value-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .team-grid.cards-2 .team-card { padding: 0.9rem; border-radius: 1.1rem; }
+    .team-grid.cards-2 .team-card h3 { font-size: 0.98rem; }
+    .team-grid.cards-2 .team-card p { font-size: 0.8rem; line-height: 1.45; }
+    .team-grid.cards-2 .instructor-photo { width: 3.6rem; height: 3.6rem; }
+    .team-grid.cards-2 .team-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}

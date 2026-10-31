@@ -8,9 +8,5 @@ __pycache__/
 venv/
 
 
-static/course/
-static/images/
-static/logo/
-static/instructors/
-static/webinar.jpg
+content/
 Archive.zip

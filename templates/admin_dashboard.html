@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>courses</h1>
-    <span class="sub">{{ stats.total }} folder(s) in static/course/ · read live from disk</span>
+    <span class="sub">{{ stats.total }} folder(s) in content/course/ · read live from disk</span>
     <div class="right">
         <a class="a-btn primary" href="{{ url_for('admin.course_new') }}">+ new course</a>
     </div>
@@ -21,7 +21,7 @@
 </div>
 
 <section class="panel">
-    <header><b>static/course/</b><span>click “inspect” on a row to see raw files, parsed curriculum and every problem found</span></header>
+    <header><b>content/course/</b><span>click “inspect” on a row to see raw files, parsed curriculum and every problem found</span></header>
     {% if courses %}
     <div class="scroll-x">
     <table class="t">
@@ -35,7 +35,7 @@
         {% for c in courses %}
             <tr class="row">
                 <td>
-                    {% if c.thumb %}<img class="thumb" src="{{ url_for('static', filename=c.thumb) }}?v={{ c.mtime|int }}" alt="">
+                    {% if c.thumb %}<img class="thumb" src="{{ url_for('media', filename=c.thumb) }}?v={{ c.mtime|int }}" alt="">
                     {% else %}<div class="thumb none">no img</div>{% endif %}
                 </td>
                 <td>
@@ -98,12 +98,12 @@
     </table>
     </div>
     {% else %}
-    <div class="empty">static/course/ has no course folders yet. <a href="{{ url_for('admin.course_new') }}">Create the first one →</a></div>
+    <div class="empty">content/course/ has no course folders yet. <a href="{{ url_for('admin.course_new') }}">Create the first one →</a></div>
     {% endif %}
 </section>
 
 <section class="panel">
-    <header><b>static/instructors/</b><span>{{ instructors|length }} profile(s)</span></header>
+    <header><b>content/instructors/</b><span>{{ instructors|length }} profile(s)</span></header>
     <div class="body">
         <span class="dim">Instructor profiles have their own section now.</span>
         <a class="a-btn small" href="{{ url_for('admin.instructors_list') }}">manage instructors →</a>

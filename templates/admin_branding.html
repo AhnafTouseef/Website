@@ -1,4 +1,5 @@
 {% extends "admin_base.html" %}
+{% from "_admin_macros.html" import img_style_panel %}
 {% block title %}branding{% endblock %}
 
 {% macro align_seg(name, value) %}
@@ -32,7 +33,7 @@
                     <option value="" data-url="{{ live[part].url or '' }}" {% if not box.logo %}selected{% endif %}>{{ '(automatic: one of the files below, picked at random)' if part == 'header' else '(same as the header logo)' }}</option>
                     {% for f in files %}<option value="{{ f }}" data-url="{{ asset('logo/' ~ f) }}" {% if box.logo == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
                 </select>
-                <div class="help">Every picture in static/logo/ is listed. Uploading below adds a new one and selects it.</div>
+                <div class="help">Every picture in content/logo/ is listed. Uploading below adds a new one and selects it.</div>
             </div>
             <div class="field span2">
                 <label class="l" for="f-{{ part }}-file">upload a new one <span class="opt">optional</span></label>
@@ -59,6 +60,7 @@
             </div>
             {% endif %}
         </div>
+        {{ img_style_panel(part ~ '_img', box.img, 'logo', live[part].url or '', '#f-' ~ part ~ '-file') }}
         <div class="pv" style="margin-top:.9rem">
             <div class="pv-{{ 'head' if part == 'header' else 'foot' }} {{ box.align[0] }}{{ ' ' ~ box.style if part == 'footer' }}" id="pv-{{ part }}">
                 <img class="pv-logo" id="pv-{{ part }}-img" alt="" {% if live[part].url %}src="{{ live[part].url }}"{% else %}hidden{% endif %} style="height: {{ box.height }}px">
@@ -136,6 +138,7 @@
             </div>
         </div>
 
+        {{ img_style_panel('slide_img', s.img, 'slide', slide_image_url or '', '#f-slide-image') }}
         <div class="pv-slide" style="margin-top:.9rem">
             <div class="pv-frame {{ s.shape }}{{ ' tilt' if s.tilt }}" id="pv-slide" style="aspect-ratio: {{ '1 / 1' if s.shape == 'circle' else s.ratio|replace('/', ' / ') }}">
                 <img id="pv-slide-img" alt="" {% if slide_image_url %}src="{{ slide_image_url }}"{% endif %}>
@@ -185,6 +188,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset('js/admin_imgstyle.js') }}"></script>
 <script>
 (function () {
     var form = document.getElementById('editor'), savebar = document.getElementById('savebar'), dirty = false;

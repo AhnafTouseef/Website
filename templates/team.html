@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% from "_macros.html" import person_photo with context %}
+{% block title %}Our team{% endblock %}
+{% block content %}
+
+<section class="tm-hero">
+    <div class="container">
+        <span class="section-label">Our team</span>
+        <h1>We Built the Platform We Wish We Had</h1>
+        <p class="tm-lead">Real people, with real profiles you can open: who they are, what they have studied and built, and how they teach.</p>
+        <ul class="tm-facts">
+            {% if people_count %}<li><b>{{ people_count }}</b> {{ 'instructor' if people_count == 1 else 'instructors' }}</li>{% endif %}
+            {% if course_count %}<li><b>{{ course_count }}</b> {{ 'course' if course_count == 1 else 'courses' }} open</li>{% endif %}
+            <li>Cohort-based · project-focused</li>
+        </ul>
+    </div>
+</section>
+
+<section class="container tm-story">
+    <div>
+        <p>In 2023, we graduated with strong grades but not enough practical experience. University courses were full of theory, and we struggled to translate lectures into real code.</p>
+        <p>{{ site_name }} started because we wanted a different path: cohort-based learning, real projects, and mentors who answer questions in a way fellow students understand.</p>
+        <p>We built this platform for affordable, career-relevant study that fits modern student life — with clear steps, practical tools, and a supportive community.</p>
+    </div>
+    <aside class="tm-timeline" aria-label="Our story in short">
+        <h2>Our story in short</h2>
+        <ol>
+            <li><b>2023</b><span>We graduated with strong grades, but not enough practical experience.</span></li>
+            <li><b>Then</b><span>We went looking for a better way to learn: cohort-based, project-led, with mentors close to students.</span></li>
+            <li><b>2026</b><span>{{ site_name }} opens its founding batch.</span></li>
+        </ol>
+    </aside>
+</section>
+
+{% if founders %}
+<section class="tm-founders" id="founders">
+    <div class="container">
+        <span class="section-label">Founding members</span>
+        <h2>Meet the founders</h2>
+        <p class="tm-sub">The people who started {{ site_name }} and still teach on it.</p>
+        <div class="tm-fgrid{{ ' one' if founders|length == 1 else ' cards-2' }}">
+            {% for p in founders %}
+            <article class="tm-fcard">
+                <a class="tm-fphoto-link" href="{{ url_for('instructor_profile', slug=p.slug) }}" aria-label="{{ p.name }}: view profile">
+                    {{ person_photo(p, 'tm-fphoto') }}
+                </a>
+                <div class="tm-fbody">
+                    {% if p.role %}<p class="tm-frole">{{ p.role }}</p>{% endif %}
+                    <h3 class="tm-fname"><a href="{{ url_for('instructor_profile', slug=p.slug) }}">{{ p.name }}</a></h3>
+                    {% if p.location %}<p class="tm-floc">📍 {{ p.location }}</p>{% endif %}
+                    {% if p.bio %}<p class="tm-fbio">{{ p.bio }}</p>{% endif %}
+                    {% if p.expertise %}<div class="tag-row tm-ftags">{% for t in p.expertise[:4] %}<span class="tag">{{ t }}</span>{% endfor %}</div>{% endif %}
+                    {% if p.socials or p.cv %}
+                    <div class="tm-flinks">
+                        {% for s in p.socials[:3] %}<a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.platform }}</a>{% endfor %}
+                        {% if p.cv %}<a href="{{ asset(p.cv) }}" target="_blank" rel="noopener">CV (PDF)</a>{% endif %}
+                    </div>
+                    {% endif %}
+                    <a class="button button-primary tm-fcta" href="{{ url_for('instructor_profile', slug=p.slug) }}">View full profile →</a>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% if instructors %}
+<section class="container tm-instructors" id="instructors">
+    <div class="section-header">
+        <p class="section-label">Instructors</p>
+        <h2>Learn from people who teach</h2>
+        <p>Every instructor has an open profile: background, experience and how they run a class.</p>
+    </div>
+    <div class="tm-igrid{{ ' cards-2' if instructors|length > 1 }}">
+        {% for p in instructors %}
+        <article class="course-tile person-tile" style="--tint: {{ p.tint }}">
+            <a class="person-media" href="{{ url_for('instructor_profile', slug=p.slug) }}" tabindex="-1" aria-label="{{ p.name }}">
+                {{ person_photo(p, 'person-photo') }}
+            </a>
+            <div class="tile-body">
+                <h3 class="tile-title"><a href="{{ url_for('instructor_profile', slug=p.slug) }}">{{ p.name }}</a></h3>
+                {% if p.role %}<p class="person-role">{{ p.role }}</p>{% endif %}
+                {% if p.bio %}<p class="tile-sub">{{ p.bio }}</p>{% endif %}
+                {% if p.expertise %}<div class="tag-row person-tags">{% for t in p.expertise[:3] %}<span class="tag tag-soft">{{ t }}</span>{% endfor %}</div>{% endif %}
+                <div class="tile-foot">
+                    <a class="button button-secondary" href="{{ url_for('instructor_profile', slug=p.slug) }}">View profile →</a>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if not founders and not instructors %}
+<section class="container tm-instructors">
+    <p class="tm-empty">Instructor profiles are coming soon.</p>
+</section>
+{% endif %}
+
+<section class="container tm-values">
+    <div class="section-header center">
+        <h2>What We Stand For</h2>
+    </div>
+    <div class="values-grid cards-2">
+        <div class="value-card">
+            <div class="value-icon">🎓</div>
+            <h4>Student-First</h4>
+            <p>Affordable pricing for university students with no hidden fees.</p>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">⚙️</div>
+            <h4>Practical Focus</h4>
+            <p>Zero theoretical fluff; actionable code applied within the week.</p>
+        </div>
+        <div class="value-card">
+            <div class="value-icon">🌱</div>
+            <h4>Growing With You</h4>
+            <p>Building in public, shaped directly by student feedback.</p>
+        </div>
+    </div>
+</section>
+
+<section class="container">
+    <div class="tm-cta">
+        <div>
+            <h2>Ready to learn with us?</h2>
+            <p>See what is open now, or join a webinar and meet the instructors first.</p>
+        </div>
+        <div class="tm-cta-actions">
+            <a class="button button-primary" href="{{ url_for('courses') }}">Browse courses</a>
+            <a class="button button-outline" href="{{ url_for('webinar') }}">See webinars</a>
+        </div>
+    </div>
+</section>
+{% endblock %}

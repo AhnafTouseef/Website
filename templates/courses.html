@@ -14,7 +14,7 @@
         <span class="status-text">Available Now</span>
     </div>
     {% if courses %}
-    <div class="course-grid">
+    <div class="course-grid{{ ' cards-2' if courses|length > 1 }}">
         {% for course in courses %}
         {% include "_course_card.html" %}
         {% endfor %}

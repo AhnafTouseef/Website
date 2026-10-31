@@ -30,3 +30,111 @@
     <template>{{ rep_row(name, '__i__', {}, fields) }}</template>
 </div>
 {% endmacro %}
+
+
+{# Image style panel: fit, focus, zoom, border, corners, shadow and a custom-CSS box, with a live preview.
+   prefix   = form field prefix (fields are <prefix>_fit, _x, _y, _zoom, _bstyle, _bw, _bcolor, _rmode, _radius, _shadow, _css)
+   st       = the clean style dict of this picture      kind = thumb | photo | cover | logo | slide
+   src      = URL of the picture shown today (may be empty)     file = CSS selector of the file input that uploads a new one #}
+{% macro img_style_panel(prefix, st, kind, src='', file='') %}
+{% set parts = img_parts(kind) %}
+{% set lim = img_limits %}
+<details class="imgs" data-imgs data-prefix="{{ prefix }}" data-kind="{{ kind }}" data-src="{{ src }}" data-file="{{ file }}"
+         data-defaults="{{ img_defaults(kind)|tojson|forceescape }}"{% if imgstyle(st, kind).active %} open{% endif %}>
+    <summary><b>picture style</b> <span class="imgs-flag" hidden>● changed</span>
+        <span class="dim">{{ 'fit, position, zoom, ' if 'fit' in parts }}border{{ ', corners' if 'radius' in parts }}{{ ', shadow' if 'shadow' in parts }}, custom CSS</span></summary>
+    <div class="imgs-body">
+        <div class="imgs-ctl">
+            {% if 'fit' in parts %}
+            <div class="field">
+                <label class="l">fit inside the frame</label>
+                <div class="seg" role="radiogroup">
+                    <label><input type="radio" name="{{ prefix }}_fit" value="cover" {% if st.fit == 'cover' %}checked{% endif %}> fill (crop edges)</label>
+                    <label><input type="radio" name="{{ prefix }}_fit" value="contain" {% if st.fit == 'contain' %}checked{% endif %}> show all</label>
+                </div>
+            </div>
+            {% endif %}
+            {% if 'focus' in parts %}
+            {% for key, label, hint in (('x', 'focus: left ↔ right', '0 left · 50 centre · 100 right'), ('y', 'focus: top ↕ bottom', '0 top · 50 centre · 100 bottom')) %}
+            <div class="field">
+                <label class="l" for="{{ prefix }}-{{ key }}">{{ label }}</label>
+                <div class="slider-line">
+                    <input type="range" data-pair="{{ prefix }}-{{ key }}" min="{{ lim[key][0] }}" max="{{ lim[key][1] }}" value="{{ st[key] }}" aria-label="{{ label }} slider">
+                    <input id="{{ prefix }}-{{ key }}" type="number" name="{{ prefix }}_{{ key }}" min="{{ lim[key][0] }}" max="{{ lim[key][1] }}" value="{{ st[key] }}">
+                </div>
+                <div class="help">{{ hint }}</div>
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% if 'zoom' in parts %}
+            <div class="field">
+                <label class="l" for="{{ prefix }}-zoom">zoom</label>
+                <div class="slider-line">
+                    <input type="range" data-pair="{{ prefix }}-zoom" min="{{ lim.zoom[0] }}" max="{{ lim.zoom[1] }}" value="{{ st.zoom }}" aria-label="zoom slider">
+                    <input id="{{ prefix }}-zoom" type="number" name="{{ prefix }}_zoom" min="{{ lim.zoom[0] }}" max="{{ lim.zoom[1] }}" value="{{ st.zoom }}">
+                </div>
+                <div class="help">percent · 100 = whole picture, 200 = twice as close</div>
+            </div>
+            {% endif %}
+            {% if 'border' in parts %}
+            <div class="field">
+                <label class="l" for="{{ prefix }}-bstyle">border</label>
+                <select id="{{ prefix }}-bstyle" name="{{ prefix }}_bstyle">
+                    {% for v in ('none', 'solid', 'dashed', 'dotted', 'double') %}<option value="{{ v }}" {% if st.bstyle == v %}selected{% endif %}>{{ 'none (as designed)' if v == 'none' else v }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label class="l" for="{{ prefix }}-bw">border width (px)</label>
+                <div class="slider-line">
+                    <input type="range" data-pair="{{ prefix }}-bw" min="{{ lim.bw[0] }}" max="{{ lim.bw[1] }}" value="{{ st.bw }}" aria-label="border width slider">
+                    <input id="{{ prefix }}-bw" type="number" name="{{ prefix }}_bw" min="{{ lim.bw[0] }}" max="{{ lim.bw[1] }}" value="{{ st.bw }}">
+                </div>
+            </div>
+            <div class="field">
+                <label class="l" for="{{ prefix }}-bcolor">border colour {{ '(also the glow)' if 'shadow' in parts }}</label>
+                <input id="{{ prefix }}-bcolor" class="imgs-color" type="color" name="{{ prefix }}_bcolor" value="{{ st.bcolor }}">
+            </div>
+            {% endif %}
+            {% if 'radius' in parts %}
+            <div class="field">
+                <label class="l" for="{{ prefix }}-rmode">corners</label>
+                <select id="{{ prefix }}-rmode" name="{{ prefix }}_rmode">
+                    {% for v, t in (('default', 'keep the original'), ('custom', 'custom roundness'), ('circle', 'circle')) %}<option value="{{ v }}" {% if st.rmode == v %}selected{% endif %}>{{ t }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="field">
+                <label class="l" for="{{ prefix }}-radius">roundness (px, for “custom”)</label>
+                <div class="slider-line">
+                    <input type="range" data-pair="{{ prefix }}-radius" min="{{ lim.radius[0] }}" max="{{ lim.radius[1] }}" value="{{ st.radius }}" aria-label="roundness slider">
+                    <input id="{{ prefix }}-radius" type="number" name="{{ prefix }}_radius" min="{{ lim.radius[0] }}" max="{{ lim.radius[1] }}" value="{{ st.radius }}">
+                </div>
+            </div>
+            {% endif %}
+            {% if 'shadow' in parts %}
+            <div class="field">
+                <label class="l" for="{{ prefix }}-shadow">shadow / glow</label>
+                <select id="{{ prefix }}-shadow" name="{{ prefix }}_shadow">
+                    {% for v in ('none', 'soft', 'strong', 'glow') %}<option value="{{ v }}" {% if st.shadow == v %}selected{% endif %}>{{ 'none (as designed)' if v == 'none' else v }}</option>{% endfor %}
+                </select>
+            </div>
+            {% endif %}
+            {% if 'css' in parts %}
+            <div class="field span2">
+                <label class="l" for="{{ prefix }}-css">custom CSS <span class="opt">optional</span></label>
+                <textarea id="{{ prefix }}-css" name="{{ prefix }}_css" rows="4" maxlength="{{ img_css_max }}" spellcheck="false" placeholder="filter: grayscale(1);&#10;opacity: 0.9;">{{ st.css }}</textarea>
+                <div class="help">For anything the controls above do not cover. One <code>property: value;</code> per line, applied to the picture's frame.
+                    No selectors, braces or @rules; <code>url()</code>, <code>@import</code>, <code>expression()</code> and <code>javascript:</code> are refused, and so are <code>position</code> other than static/relative and <code>z-index</code> above 10.
+                    Max {{ img_css_max }} characters. <span class="imgs-count"></span></div>
+            </div>
+            {% endif %}
+            <div class="field span2"><button type="button" class="a-btn small" data-imgs-reset>reset picture style</button></div>
+        </div>
+        <div class="imgs-pv">
+            <div class="imgs-stage">
+                <div class="imgs-frame k-{{ kind }}"><img alt="" decoding="async"></div>
+            </div>
+            <div class="help">Live preview. It shows how the picture is framed; the real page uses the same settings.</div>
+        </div>
+    </div>
+</details>
+{% endmacro %}

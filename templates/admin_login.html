@@ -9,7 +9,7 @@
             <span style="margin-left:.5rem">restricted — authorised access only</span>
         </header>
         <div class="body">
-            <div class="prompt">belajar@console:~$ sudo login<span class="cursor"></span></div>
+            <div class="prompt">{{ site_name|lower }}@console:~$ sudo login<span class="cursor"></span></div>
             <form method="post" autocomplete="off">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">

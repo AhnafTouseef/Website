@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>instructors</h1>
-    <span class="sub">{{ stats.total }} folder(s) in static/instructors/ · each one gets a public profile page</span>
+    <span class="sub">{{ stats.total }} folder(s) in content/instructors/ · each one gets a public profile page</span>
     <div class="right">
         <a class="a-btn primary" href="{{ url_for('admin.instructor_new') }}">+ add instructor</a>
     </div>
@@ -18,7 +18,7 @@
 </div>
 
 <section class="panel">
-    <header><b>static/instructors/</b><span>click “inspect” to see which profile sections are filled in and any problems found</span></header>
+    <header><b>content/instructors/</b><span>click “inspect” to see which profile sections are filled in and any problems found</span></header>
     {% if people %}
     <div class="scroll-x">
     <table class="t">
@@ -26,9 +26,9 @@
         <tbody>
         {% for p in people %}
             <tr class="row">
-                <td>{% if p.photo %}<img class="thumb square" src="{{ url_for('static', filename=p.photo) }}" alt="">{% else %}<div class="thumb square none">—</div>{% endif %}</td>
+                <td>{% if p.photo %}<img class="thumb square" src="{{ url_for('media', filename=p.photo) }}" alt="">{% else %}<div class="thumb square none">—</div>{% endif %}</td>
                 <td>
-                    <div class="cell-title">{{ p.name }}</div>
+                    <div class="cell-title">{{ p.name }}{% if p.founder %} <span class="chip founder" title="Shown in the Founding members section">founder</span>{% endif %}</div>
                     <div class="cell-slug">{{ p.role or 'no role set' }} · /instructor/{{ p.slug }}</div>
                     <details class="dd" style="margin-top:.3rem"><summary>inspect</summary></details>
                 </td>
@@ -78,7 +78,7 @@
     </table>
     </div>
     {% else %}
-    <div class="empty">static/instructors/ has no folders yet. <a href="{{ url_for('admin.instructor_new') }}">Add the first instructor →</a></div>
+    <div class="empty">content/instructors/ has no folders yet. <a href="{{ url_for('admin.instructor_new') }}">Add the first instructor →</a></div>
     {% endif %}
 </section>
 {% endblock %}
