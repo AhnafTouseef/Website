@@ -1,0 +1,94 @@
+{% extends "admin_base.html" %}
+{% block title %}visitors{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>visitors</h1>
+    <span class="sub">every page a real visitor opens · content/analytics/visits-YYYY-MM.csv</span>
+</div>
+
+{% if not tracking %}<div class="a-note" style="border-left-color: var(--a-red)"><b>Tracking is switched off</b> (environment variable TRACK_VISITORS=off). Nothing new is recorded.</div>{% endif %}
+<div class="a-note">Recorded: the page, time, IP address, country, city and network (looked up from the IP at a free public service, once per IP), device, browser, language, and the site or campaign link the visitor came from. <b>Not recorded:</b> this admin console, logged-in admins, bots{% if dnt %}, and visitors whose browser sends Do Not Track{% endif %}. {% if not geo %}<b>Location lookup is off</b> (GEO_LOOKUP=off), so country and city stay empty.{% endif %} The files are private: never served by the website, and best kept out of GitHub.</div>
+
+<div class="tiles">
+    <div class="tile {{ 'ok' if s.online }}"><div class="k">online now <small>(last {{ online_minutes }} min)</small></div><div class="v">{{ s.online }}</div></div>
+    <div class="tile"><div class="k">today</div><div class="v">{{ s.today_visitors }} <small>visitors · {{ s.today_views }} views</small></div></div>
+    <div class="tile"><div class="k">last 7 days</div><div class="v">{{ s.week_visitors }} <small>visitors · {{ s.week_views }} views</small></div></div>
+    <div class="tile"><div class="k">last 30 days</div><div class="v">{{ s.month_visitors }} <small>visitors · {{ s.month_views }} views</small></div></div>
+    <div class="tile"><div class="k">new / returning (30 d)</div><div class="v">{{ s.new }} <small>new</small> · {{ s.returning }} <small>returning</small></div></div>
+</div>
+
+<section class="panel">
+    <header><b>visitors per day</b><span>last 14 days (each person counted once a day)</span></header>
+    <div class="body">
+        <div class="daybars">
+            {% for d in s.days %}
+            <div class="daybar" title="{{ d.day }}: {{ d.visitors }} visitors, {{ d.views }} page views">
+                <span class="n">{{ d.visitors }}</span>
+                <span class="bar"><i style="height: {{ d.pct }}%"></i></span>
+                <span class="l">{{ d.label }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>who visits</b><span>last 30 days, each visitor counted once; pages count views</span></header>
+    <div class="body aud-grid">
+        <div class="aud">
+            <h4>Top pages</h4>
+            {% for it in s.pages %}
+            <div class="aud-row"><span class="aud-label" title="{{ it.label }}">{{ it.label }}</span><span class="aud-bar"><i style="width: {{ it.pct }}%"></i></span><span class="aud-n">{{ it.n }}</span></div>
+            {% else %}<div class="dim">no visits yet</div>{% endfor %}
+        </div>
+        {% for title, items in s.audience %}
+        <div class="aud">
+            <h4>{{ title }}</h4>
+            {% for it in items %}
+            <div class="aud-row"><span class="aud-label" title="{{ it.label }}">{{ it.label }}</span><span class="aud-bar"><i style="width: {{ it.pct }}%"></i></span><span class="aud-n">{{ it.n }}</span></div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>latest activity</b></header>
+    {% if s.recent %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>time (BD)</th><th>page</th><th>from</th><th>came from</th><th>device</th><th>visitor</th></tr></thead>
+        <tbody>
+        {% for r in s.recent %}
+            <tr class="row">
+                <td class="mono-sm nowrap">{{ r.time }}</td>
+                <td class="mono-sm">{{ r.path }}</td>
+                <td>{{ place(r) or r.ip }}{% if r.isp %} <span class="dim">· {{ r.isp }}</span>{% endif %}</td>
+                <td class="dim">{{ r.utm_source or r.referrer or 'direct' }}</td>
+                <td class="dim">{{ r.device }} · {{ r.browser }}</td>
+                <td class="mono-sm dim">{{ r.visitor_id[:6] }}{% if r.new_visitor == '1' %} <span class="chip draft">new</span>{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<div class="empty">no visits recorded yet. They appear a few seconds after someone opens a page.</div>{% endif %}
+</section>
+
+{% if files %}
+<section class="panel">
+    <header><b>files</b><span>one per month, kept until you delete them in the file browser</span></header>
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>month</th><th class="num">rows</th><th class="num">size</th><th>download</th></tr></thead>
+        <tbody>
+        {% for f in files %}
+            <tr class="row"><td class="mono-sm">{{ f.month }}</td><td class="num">{{ f.rows }}</td><td class="num">{{ f.size|filesize }}</td>
+                <td><a class="a-btn small" href="{{ url_for('admin.visitors_download', month=f.month) }}">{{ f.name }}</a></td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</section>
+{% endif %}
+{% endblock %}

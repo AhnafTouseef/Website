@@ -1,0 +1,113 @@
+{% extends "admin_base.html" %}
+{% block title %}messages{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>messages</h1>
+    <span class="sub">sent through the form on the FAQ page · stored in content/faq/messages.csv</span>
+    <div class="right">
+        {% if exists %}<a class="a-btn" href="{{ url_for('admin.messages_download') }}">download .csv</a>{% endif %}
+    </div>
+</div>
+
+<div class="a-note">Each message keeps what the site learns by itself: IP address, country, city and network (looked up from the IP), device, browser, language, and where the visitor first came from (referring site or campaign tags such as <b>?utm_source=facebook&amp;utm_campaign=launch</b> on a link you share). Treat it as private: it is never shown on the website and <b>content/faq/</b> is not served publicly. Keep <b>messages.csv</b> out of GitHub.</div>
+
+{% if unreadable %}<div class="a-note" style="border-left-color: var(--a-red)"><b>messages.csv cannot be read.</b> It has content but no header row (the first line must be <b>id,received,status,name,email,message,...</b>). Open it in the file browser and fix the first line. Nothing was deleted; if a new message arrives meanwhile, the old file is first copied to <b>messages.unreadable-&lt;date&gt;.csv</b>.</div>{% endif %}
+
+<div class="tiles">
+    <div class="tile {{ 'warn' if stats.new else 'ok' }}"><div class="k">new</div><div class="v">{{ stats.new }}</div></div>
+    <div class="tile"><div class="k">done</div><div class="v">{{ stats.done }}</div></div>
+    <div class="tile"><div class="k">last 7 days</div><div class="v">{{ stats.week }}</div></div>
+    <div class="tile"><div class="k">all time</div><div class="v">{{ stats.total }}</div></div>
+</div>
+
+{% if audience %}
+<section class="panel">
+    <header><b>who is writing to us</b><span>counted over all {{ stats.total }} message(s)</span></header>
+    <div class="body aud-grid">
+        {% for title, items in audience %}
+        <div class="aud">
+            <h4>{{ title }}</h4>
+            {% for it in items %}
+            <div class="aud-row"><span class="aud-label" title="{{ it.label }}">{{ it.label }}</span><span class="aud-bar"><i style="width: {{ it.pct }}%"></i></span><span class="aud-n">{{ it.n }}</span></div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="panel">
+    <header>
+        <b>inbox</b>
+        <div class="right">
+            <form class="inline msg-filter" method="get" action="{{ url_for('admin.messages') }}">
+                <select name="show" onchange="this.form.submit()">
+                    {% for v, label in (('all', 'all'), ('new', 'new only'), ('done', 'done only')) %}
+                    <option value="{{ v }}" {{ 'selected' if show == v }}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <input type="search" name="q" value="{{ q }}" placeholder="search name, email, text…">
+                <button class="a-btn small" type="submit">search</button>
+            </form>
+        </div>
+    </header>
+    {% if messages %}
+    {% for m in messages %}
+    <article class="msg {{ m.status }}">
+        <div class="msg-head">
+            <span class="chip {{ 'draft' if m.status == 'new' else 'published' }}">{{ m.status }}</span>
+            <b>{{ m.name }}</b>
+            <a href="mailto:{{ m.email }}">{{ m.email }}</a>
+            <span class="dim mono-sm">{{ m.received }}</span>
+            <span class="msg-actions">
+                <form class="inline" method="post" action="{{ url_for('admin.message_status', msg_id=m.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="status" value="{{ 'new' if m.status == 'done' else 'done' }}">
+                    <input type="hidden" name="back" value="{{ request.full_path.rstrip('?') }}">
+                    <button class="a-btn small {{ 'primary' if m.status == 'new' }}" type="submit">{{ 'mark as new' if m.status == 'done' else 'mark done' }}</button>
+                </form>
+                <form class="inline" method="post" action="{{ url_for('admin.message_delete', msg_id=m.id) }}" data-confirm="Move this message from {{ m.name }} to the trash?">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="a-btn small danger" type="submit">delete</button>
+                </form>
+            </span>
+        </div>
+        <p class="msg-text">{{ m.message }}</p>
+        <div class="msg-meta">
+            {% if place(m) %}<span><i>from</i> {{ place(m) }}</span>{% endif %}
+            {% if m.isp %}<span><i>network</i> {{ m.isp }}</span>{% endif %}
+            <span><i>device</i> {{ m.device }} · {{ m.browser }} · {{ m.os }}</span>
+            <span><i>came from</i> {{ m.utm_source or m.first_referrer or 'direct or unknown' }}</span>
+        </div>
+        <details class="msg-tech">
+            <summary>technical details</summary>
+            <dl>
+                <dt>IP address</dt><dd>{{ m.ip or '—' }}</dd>
+                <dt>location</dt><dd>{{ [m.city, m.region, m.country]|select|join(', ') or '—' }}</dd>
+                <dt>network</dt><dd>{{ m.isp or '—' }}</dd>
+                <dt>time zone</dt><dd>{{ m.visitor_timezone or '—' }}</dd>
+                <dt>language</dt><dd>{{ m.language or '—' }}</dd>
+                <dt>first came from</dt><dd>{{ m.first_referrer or 'direct or unknown' }}</dd>
+                <dt>campaign tags</dt><dd>{{ [m.utm_source, m.utm_medium, m.utm_campaign]|select|join(' / ') or '—' }}</dd>
+                <dt>first page</dt><dd>{{ m.landing_page or '—' }}</dd>
+                {% set seen = history.get(m.visitor_id, []) if m.visitor_id else [] %}
+                <dt>pages viewed</dt><dd>{% if seen %}{{ seen|length }} in the last 30 days: {{ seen[-8:]|map(attribute='path')|join(' → ') }}{% else %}—{% endif %}</dd>
+                <dt>message id</dt><dd>{{ m.id }}</dd>
+            </dl>
+        </details>
+    </article>
+    {% endfor %}
+    {% else %}
+    <div class="empty">{% if stats.total %}no messages match this filter{% else %}no messages yet. They appear here when someone uses the form on the FAQ page.{% endif %}</div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('submit', function (e) {
+    var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
+    if (msg && !window.confirm(msg)) e.preventDefault();
+});
+</script>
+{% endblock %}

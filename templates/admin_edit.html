@@ -7,6 +7,7 @@
     <span class="sub">{% if creating %}creates content/course/&lt;folder&gt;/ with meta.json + curriculum.csv{% else %}content/course/{{ slug }}/{% endif %}</span>
     <div class="right">
         <a class="a-btn" href="{{ url_for('admin.dashboard') }}">← back</a>
+        {% if not creating %}<a class="a-btn" href="{{ url_for('admin.course_enrollments', slug=slug) }}">enrollments</a>{% endif %}
         {% if public_visible %}<a class="a-btn" href="{{ url_for('course_details', slug=slug) }}" target="_blank" rel="noopener">view public page ↗</a>{% endif %}
     </div>
 </div>

@@ -1,16 +1,19 @@
 from flask import (Flask, Blueprint, render_template, request, redirect, url_for,
                    flash, abort, session, jsonify, Response, send_file, send_from_directory)
 from markupsafe import Markup, escape
+import contextlib
 import csv
 import difflib
 import functools
 import hmac
 import io
+import ipaddress
 import json
 import logging
 import mimetypes
 import os
 import platform
+import queue
 import random
 import re
 import secrets
@@ -25,6 +28,7 @@ import zipfile
 import zlib
 import urllib.request
 import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from email.utils import parsedate_to_datetime
@@ -51,6 +55,18 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     MAX_CONTENT_LENGTH=12 * 1024 * 1024,  # hard cap for any request body (each upload is capped at 5 MB)
 )
+
+# Behind a reverse proxy (nginx, Cloudflare, a hosting platform) every request seems to come from the proxy.
+# Set TRUSTED_PROXIES to the number of proxies in front of the app (usually 1) so the visitor's real IP is
+# used (for the login lockout and the FAQ messages). Leave it at 0 when the app is reached directly:
+# otherwise anybody could fake their IP with a header.
+try:
+    TRUSTED_PROXIES = max(0, min(5, int(os.environ.get("TRUSTED_PROXIES", "0") or 0)))
+except ValueError:
+    TRUSTED_PROXIES = 0
+if TRUSTED_PROXIES:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES)
 
 
 # ---------------------------------------------------------------------------
@@ -196,16 +212,8 @@ pipeline_courses = [
     {"title": "Public Speaking & Communication", "estimate": "Est. 2027", "icon": "🎤"}
 ]
 
-faq_questions = [
-    {"question": "Do I need any prior programming experience?", "answer": "No. The course is built for beginners and starts with the fundamentals, so you can join even if you have never coded before."},
-    {"question": "What's the time commitment per week?", "answer": "Expect 6–8 hours per week for live sessions, practice, and project work. We keep the schedule manageable for busy students."},
-    {"question": "Are the sessions recorded?", "answer": "Yes. Every live session is recorded and shared with the cohort so you can catch up at your own pace."},
-    {"question": "What if I fall behind?", "answer": "We offer support through our community and Q&A sessions, plus recordings so you can review lessons at any time."},
-    {"question": "Is there a refund policy?", "answer": "Yes. We offer a refund window for early sign-ups. Contact us directly if you need help and we will respond quickly."},
-    {"question": "Will you expand to other cities or do offline classes?", "answer": "We are focused on online delivery for now, but we plan to explore local meetups and hybrid formats as we grow."},
-    {"question": "How is this different from free YouTube tutorials?", "answer": f"{SITE_NAME} is cohort-based, mentor-led, and project-focused. You get guided learning, community accountability, and real feedback."},
-    {"question": "Can I pay in installments?", "answer": "We are working on installment options and will share details with early registrants. Reach out if you are interested."}
-]
+# The general FAQ is content/faq/faq.csv (question,answer): edit it in the admin file browser or in Excel.
+# Messages sent through the form on the FAQ page are stored in content/faq/messages.csv.
 
 
 # ---------------------------------------------------------------------------
@@ -925,8 +933,9 @@ def asset_url(filename):
     return f"{url}?v={stamp}"
 
 
-MEDIA_HIDDEN_NAMES = {"curriculum.csv"}
+MEDIA_HIDDEN_NAMES = {"curriculum.csv", "enrollments.csv"}
 MEDIA_HIDDEN_EXTS = {".json"}
+MEDIA_HIDDEN_DIRS = {"faq", "analytics"}   # the students' messages and the visitor logs (emails, IPs): never public
 
 
 @app.route("/media/<path:filename>")
@@ -935,7 +944,8 @@ def media(filename):
     content (.json, curriculum.csv) and anything starting with a dot are never served."""
     name = os.path.basename(filename)
     if (name.startswith(".") or any(seg.startswith(".") for seg in filename.split("/"))
-            or name.lower() in MEDIA_HIDDEN_NAMES or os.path.splitext(name)[1].lower() in MEDIA_HIDDEN_EXTS):
+            or name.lower() in MEDIA_HIDDEN_NAMES or os.path.splitext(name)[1].lower() in MEDIA_HIDDEN_EXTS
+            or filename.split("/")[0].lower() in MEDIA_HIDDEN_DIRS):
         abort(404)
     return send_from_directory(CONTENT_DIR, filename)
 
@@ -1490,18 +1500,723 @@ def about():
     """The old About page address: kept so existing links keep working."""
     return redirect(url_for("team"), code=301)
 
+# ---------------------------------------------------------------------------
+# FAQ, messages, visitor tracking and enrolment tracking
+#
+#   content/faq/faq.csv                     the general FAQ shown on the page: columns question,answer
+#                                           (edit it in the admin file browser or in Excel; "{site_name}"
+#                                           in an answer becomes the site name)
+#   content/faq/messages.csv                what visitors send through the form on the FAQ page
+#   content/analytics/visits-YYYY-MM.csv    one row per page view of a real visitor, one file per month
+#   content/course/<course>/enrollments.csv one row each time somebody presses an Enroll button of that course
+#
+# Visitors are never asked for anything beyond name, email and message. Everything else is read from the
+# request itself: IP address, device and browser, language, the page and where they came from (referring
+# site or campaign tags such as ?utm_source=facebook), plus the country, region, city and network the IP
+# address belongs to. That last part is looked up at a free public service (ipwho.is, then ipapi.co) from a
+# background thread, so no page is ever slowed down, and every IP is looked up once and remembered.
+#
+#   Not tracked: the admin console, logged-in admins, bots, and visitors whose browser sends
+#   "Do Not Track" or "Global Privacy Control" (env RESPECT_DNT=off to ignore those signals).
+#   Switch things off with env vars: TRACK_VISITORS=off (no visit or enrolment rows), GEO_LOOKUP=off (no
+#   outside lookups: the location columns stay empty).
+#
+# All of it is plain CSV (UTF-8 with BOM, so Excel shows every language correctly), never served at /media/,
+# and every write happens under one lock, so several visitors (or server processes) cannot corrupt a file.
+# Cells that start with = + - @ get a leading apostrophe in the file so Excel never runs one as a formula;
+# it is removed again when the file is read.
+# ---------------------------------------------------------------------------
+
+FAQ_FILE = "faq.csv"
+MSG_FILE = "messages.csv"
+ENROLL_FILE = "enrollments.csv"
+MSG_COLUMNS = ["id", "received", "status", "name", "email", "message", "visitor_id", "ip", "country", "region",
+               "city", "isp", "visitor_timezone", "device", "browser", "os", "language", "first_referrer",
+               "utm_source", "utm_medium", "utm_campaign", "landing_page", "user_agent"]
+VISIT_COLUMNS = ["time", "visitor_id", "new_visitor", "ip", "country", "region", "city", "isp", "path", "referrer",
+                 "utm_source", "utm_medium", "utm_campaign", "device", "browser", "os", "language"]
+ENROLL_COLUMNS = ["time", "visitor_id", "button", "ip", "country", "region", "city", "isp", "device", "browser", "os",
+                  "language", "first_referrer", "utm_source", "utm_medium", "utm_campaign", "landing_page"]
+GEO_COLUMNS = ("country", "region", "city", "isp")
+MSG_LIMITS = {"name": 100, "email": 150, "message": 3000}
+MSG_MAX_ROWS = 20000
+MSG_MIN_SECONDS = 2               # a human needs longer than this to fill in the form
+MSG_PER_IP_HOUR = 5
+MSG_PER_DAY = 500
+ENROLL_REPEAT_MINUTES = 30        # the same visitor pressing Enroll on the same course again within this time counts once
+ONLINE_MINUTES = 5                # "online now" = a page view in the last 5 minutes
+VISITOR_COOKIE = "vid"
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_msg_thread_lock = threading.RLock()
+_lock_state = threading.local()
+_msg_hits = {}                    # ip -> timestamps of recent messages
+_msg_hits_lock = threading.Lock()
+
+
+def _env_on(name, default=True):
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value not in ("off", "0", "false", "no")
+
+
+def _faq_dir():
+    return os.path.join(CONTENT_DIR, "faq")
+
+
+def _analytics_dir():
+    return os.path.join(CONTENT_DIR, "analytics")
+
+
+@contextlib.contextmanager
+def _data_lock():
+    """One writer at a time, across threads and across server processes."""
+    with _msg_thread_lock:
+        if getattr(_lock_state, "depth", 0):          # already held by this thread (a nested call): do not lock twice
+            _lock_state.depth += 1
+            try:
+                yield
+            finally:
+                _lock_state.depth -= 1
+            return
+        os.makedirs(CONTENT_DIR, exist_ok=True)
+        fh = open(os.path.join(CONTENT_DIR, ".datalock"), "a+b")
+        _lock_state.depth = 1
+        locked = None
+        try:
+            try:
+                import fcntl
+                fcntl.flock(fh, fcntl.LOCK_EX)
+                locked = "fcntl"
+            except ImportError:
+                try:
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    locked = "msvcrt"
+                except (ImportError, OSError):
+                    locked = None
+            except OSError:
+                locked = None
+            yield
+        finally:
+            _lock_state.depth = 0
+            try:
+                if locked == "fcntl":
+                    import fcntl
+                    fcntl.flock(fh, fcntl.LOCK_UN)
+                elif locked == "msvcrt":
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except (ImportError, OSError):
+                pass
+            fh.close()
+
+
+
+
+
+def _csv_safe(value):
+    value = "" if value is None else str(value)
+    return "'" + value if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
+def _csv_unsafe(value):
+    return value[1:] if value[:1] == "'" and value[1:2] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
+def load_faq():
+    """[{question, answer}] from content/faq/faq.csv. A missing or unreadable file means an empty list."""
+    path = os.path.join(_faq_dir(), FAQ_FILE)
+    try:
+        with open(path, "rb") as fh:
+            rows = [r for r in _csv_rows(fh.read(2 * 1024 * 1024)) if any(c.strip() for c in r)]
+    except FileNotFoundError:
+        return []
+    except (OSError, csv.Error) as exc:
+        log.warning("Could not read content/faq/%s (%s)", FAQ_FILE, exc)
+        return []
+    if not rows:
+        return []
+    head = [c.strip().lower() for c in rows[0]]
+    if "question" in head:
+        qi = head.index("question")
+        ai = head.index("answer") if "answer" in head else None
+        rows = rows[1:]
+    else:
+        qi, ai = 0, 1
+    out = []
+    for r in rows:
+        q = r[qi].strip() if qi < len(r) else ""
+        a = r[ai].strip() if ai is not None and ai < len(r) else ""
+        if q and a:
+            out.append({"question": q, "answer": a.replace("{site_name}", SITE_NAME)})
+    return out
+
+
+# ---------- append-only logs (visits, enrolments) ----------
+
+def _append_csv(path, columns, row):
+    """Add one row to a log file, creating it (with a header) when needed. A file whose header row was
+    changed by hand is kept aside under another name instead of being mixed with new rows."""
+    header = ",".join(columns)
+    with _data_lock():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fresh = not os.path.isfile(path) or os.path.getsize(path) == 0
+        if not fresh:
+            with open(path, "rb") as fh:
+                first = fh.readline().decode("utf-8-sig", "replace").strip()
+            if first != header:
+                kept = path[:-4] + ".old-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
+                os.replace(path, kept)
+                log.warning("%s had a different header row; it was renamed to %s", os.path.basename(path), os.path.basename(kept))
+                fresh = True
+        buf = io.StringIO(newline="")
+        writer = csv.writer(buf, lineterminator="\r\n")
+        writer.writerow([_csv_safe(row.get(c, "")) for c in columns])
+        data = buf.getvalue().encode("utf-8")
+        if fresh:
+            data = b"\xef\xbb\xbf" + (header + "\r\n").encode("utf-8") + data
+        with open(path, "ab") as fh:
+            if not fresh and fh.tell() and _last_byte(path) not in (b"\n", b"\r"):
+                fh.write(b"\r\n")
+            fh.write(data)
+
+
+def _last_byte(path):
+    with open(path, "rb") as fh:
+        fh.seek(-1, os.SEEK_END)
+        return fh.read(1)
+
+
+def _read_log(path, limit_bytes=96 * 1024 * 1024):
+    """A log file as a list of dicts (header names as keys). Unreadable or missing: an empty list."""
+    try:
+        with _data_lock():
+            with open(path, "rb") as fh:
+                rows = _csv_rows(fh.read(limit_bytes))
+    except FileNotFoundError:
+        return []
+    except (OSError, csv.Error) as exc:
+        log.warning("Could not read %s (%s)", os.path.basename(path), exc)
+        return []
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if len(rows) < 2:
+        return []
+    head = [c.strip().lower() for c in rows[0]]
+    return [{name: (_csv_unsafe(r[i]) if i < len(r) else "") for i, name in enumerate(head) if name} for r in rows[1:]]
+
+
+def _count_log(path):
+    try:
+        with open(path, "rb") as fh:
+            return max(0, sum(1 for _ in fh) - 1)
+    except OSError:
+        return 0
+
+
+# ---------- messages (the form on the FAQ page) ----------
+
+def _msg_path():
+    return os.path.join(_faq_dir(), MSG_FILE)
+
+
+def _read_messages_unlocked():
+    try:
+        with open(_msg_path(), "rb") as fh:
+            rows = _csv_rows(fh.read(64 * 1024 * 1024))
+    except FileNotFoundError:
+        return []
+    except (OSError, csv.Error) as exc:
+        log.warning("Could not read content/faq/%s (%s)", MSG_FILE, exc)
+        return []
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    head = [c.strip().lower() for c in rows[0]]
+    if "message" not in head and "email" not in head:
+        log.warning("content/faq/%s has no header row (expected: %s)", MSG_FILE, ",".join(MSG_COLUMNS[:6]) + ",...")
+        return []
+    out = []
+    for raw in rows[1:]:
+        row = {}
+        extra = {}
+        for i, name in enumerate(head):
+            cell = _csv_unsafe(raw[i]) if i < len(raw) else ""
+            if name in MSG_COLUMNS:
+                row[name] = cell
+            elif name:
+                extra[name] = cell
+        for col in MSG_COLUMNS:
+            row.setdefault(col, "")
+        row["status"] = "done" if row["status"].strip().lower() == "done" else "new"
+        if not row["id"].strip():
+            row["id"] = "r%08x" % zlib.crc32("|".join(raw).encode("utf-8"))
+        row["_extra"] = extra          # columns somebody added by hand are kept when the file is rewritten
+        out.append(row)
+    return out
+
+
+def read_messages():
+    """Every stored message, oldest first."""
+    with _data_lock():
+        return _read_messages_unlocked()
+
+
+def _write_messages_unlocked(rows):
+    extra = []
+    for r in rows:
+        for key in r.get("_extra", {}):
+            if key not in extra:
+                extra.append(key)
+    out = io.StringIO(newline="")
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(MSG_COLUMNS + extra)
+    for r in rows:
+        writer.writerow([_csv_safe(r.get(c, "")) for c in MSG_COLUMNS]
+                        + [_csv_safe(r.get("_extra", {}).get(k, "")) for k in extra])
+    os.makedirs(_faq_dir(), exist_ok=True)
+    _atomic_write(_msg_path(), "﻿" + out.getvalue())
+
+
+def messages_file_unreadable():
+    """True when messages.csv has content but no message could be read from it (for example its header row was deleted)."""
+    try:
+        return os.path.getsize(_msg_path()) > 3 and not read_messages()
+    except OSError:
+        return False
+
+
+def add_message(row):
+    """Append one message. Returns False when the file is full."""
+    with _data_lock():
+        rows = _read_messages_unlocked()
+        if len(rows) >= MSG_MAX_ROWS:
+            return False
+        if not rows and os.path.isfile(_msg_path()) and os.path.getsize(_msg_path()) > 3:
+            # the file has content that cannot be read: keep it aside instead of writing over it
+            kept = os.path.join(_faq_dir(), "messages.unreadable-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv")
+            shutil.copy2(_msg_path(), kept)
+            log.warning("content/faq/%s could not be read; a copy was kept as %s", MSG_FILE, os.path.basename(kept))
+        rows.append(row)
+        _write_messages_unlocked(rows)
+    return True
+
+
+def update_message(msg_id, **fields):
+    with _data_lock():
+        rows = _read_messages_unlocked()
+        for r in rows:
+            if r["id"] == msg_id:
+                r.update(fields)
+                _write_messages_unlocked(rows)
+                return True
+    return False
+
+
+def pop_message(msg_id):
+    """Remove one message from the file and return it (None when there is no such message)."""
+    with _data_lock():
+        rows = _read_messages_unlocked()
+        for i, r in enumerate(rows):
+            if r["id"] == msg_id:
+                rows.pop(i)
+                _write_messages_unlocked(rows)
+                return r
+    return None
+
+
+def message_counts():
+    rows = read_messages()
+    return {"total": len(rows), "new": sum(1 for r in rows if r["status"] == "new")}
+
+
+# ---------- where an IP address is: country, region, city, network ----------
+
+_geo_cache = {}                   # ip -> {country, region, city, isp}
+_geo_failed = {}                  # ip -> time of the last failed lookup (tried again after 15 minutes)
+_geo_state = {"loaded": False}
+
+
+def _geo_enabled():
+    return _env_on("GEO_LOOKUP", True)
+
+
+def _geo_parse_ipwho(data):
+    if not data.get("success"):
+        return None
+    conn = data.get("connection") or {}
+    return {"country": data.get("country"), "region": data.get("region"), "city": data.get("city"),
+            "isp": conn.get("isp") or conn.get("org")}
+
+
+def _geo_parse_ipapi(data):
+    if data.get("error") or not (data.get("country_name") or data.get("city")):
+        return None
+    return {"country": data.get("country_name"), "region": data.get("region"), "city": data.get("city"), "isp": data.get("org")}
+
+
+GEO_PROVIDERS = (
+    ("https://ipwho.is/{ip}?fields=success,country,region,city,connection", _geo_parse_ipwho),
+    ("https://ipapi.co/{ip}/json/", _geo_parse_ipapi),
+)
+
+
+def _geo_fetch(ip):
+    """Ask the public lookup services about one IP address. None when none of them answers."""
+    for url, parse in GEO_PROVIDERS:
+        try:
+            with _http_open(url.format(ip=ip)) as resp:
+                data = json.loads(resp.read(65536).decode("utf-8"))
+            geo = parse(data) if isinstance(data, dict) else None
+        except Exception as exc:          # no network, rate limited, bad answer: try the next service
+            log.info("Location lookup at %s failed (%s)", urlsplit(url).hostname, exc)
+            continue
+        if geo:
+            return {k: str(geo.get(k) or "")[:80] for k in GEO_COLUMNS}
+    return None
+
+
+def _geo_preload():
+    """Fill the cache from what earlier visits already learned, so a restart does not repeat the lookups."""
+    _geo_state["loaded"] = True
+    try:
+        names = sorted(n for n in os.listdir(_analytics_dir()) if n.startswith("visits-") and n.endswith(".csv"))[-2:]
+    except OSError:
+        names = []
+    for name in names:
+        for r in _read_log(os.path.join(_analytics_dir(), name)):
+            if r.get("ip") and (r.get("country") or r.get("city")):
+                _geo_cache[r["ip"]] = {k: r.get(k, "") for k in GEO_COLUMNS}
+
+
+def geo_cached(ip):
+    if not _geo_state["loaded"]:
+        _geo_preload()
+    return _geo_cache.get(ip)
+
+
+def geo_lookup(ip):
+    """{country, region, city, isp} for a public IP address (remembered after the first lookup), or None."""
+    if not _geo_enabled():
+        return None
+    try:
+        if not ipaddress.ip_address(ip).is_global:
+            return None
+    except ValueError:
+        return None
+    hit = geo_cached(ip)
+    if hit:
+        return hit
+    if time.time() - _geo_failed.get(ip, 0) < 900:
+        return None
+    geo = _geo_fetch(ip)
+    if not geo:
+        _geo_failed[ip] = time.time()
+        return None
+    if len(_geo_cache) > 20000:
+        _geo_cache.clear()
+    _geo_cache[ip] = geo
+    return geo
+
+
+# ---------- what we learn about a visitor (all of it from the request itself) ----------
+
+def _parse_ua(ua):
+    ua = ua or ""
+    low = ua.lower()
+    if re.search(r"bot|crawl|spider|slurp|curl|wget|python-requests|headless|monitor|facebookexternalhit|preview", low):
+        device = "bot"
+    elif "ipad" in low or "tablet" in low or ("android" in low and "mobile" not in low):
+        device = "tablet"
+    elif re.search(r"mobi|iphone|android", low):
+        device = "mobile"
+    else:
+        device = "desktop"
+    browser = ("Edge" if "edg/" in low or "edge/" in low else
+               "Opera" if "opr/" in low or "opera" in low else
+               "Samsung Internet" if "samsungbrowser" in low else
+               "Firefox" if "firefox/" in low or "fxios" in low else
+               "Chrome" if "chrome/" in low or "crios" in low else
+               "Safari" if "safari/" in low else "Other")
+    os_name = ("Windows" if "windows" in low else
+               "Android" if "android" in low else
+               "iOS" if re.search(r"iphone|ipad|ipod", low) else
+               "macOS" if "mac os x" in low or "macintosh" in low else
+               "ChromeOS" if "cros" in low else
+               "Linux" if "linux" in low else "Other")
+    return device, browser, os_name
+
+
+def _language():
+    return request.headers.get("Accept-Language", "").split(",")[0].split(";")[0].strip()[:20]
+
+
+def _external_host():
+    """Host name of the site that sent the visitor here ("" for our own pages or no referrer)."""
+    try:
+        host = (urlsplit(request.referrer or "").hostname or "").lower()
+    except ValueError:
+        return ""
+    return "" if host == request.host.split(":")[0].lower() else host[:80]
+
+
+def _campaign_tags():
+    return {k: request.args.get(k, "").strip()[:60] for k in ("utm_source", "utm_medium", "utm_campaign")}
+
+
+def _tracking_allowed():
+    """Whether this request may be recorded in the visit and enrolment logs."""
+    if not _env_on("TRACK_VISITORS", True) or session.get("admin"):
+        return False
+    if _env_on("RESPECT_DNT", True) and (request.headers.get("DNT") == "1" or request.headers.get("Sec-GPC") == "1"):
+        return False
+    return _parse_ua(request.headers.get("User-Agent", ""))[0] != "bot"
+
+
+def _visitor_id():
+    """(id, is_new): the id from the visitor's cookie, or a new one."""
+    vid = request.cookies.get(VISITOR_COOKIE, "")
+    if re.fullmatch(r"[0-9a-f]{16}", vid):
+        return vid, False
+    return secrets.token_hex(8), True
+
+
+def _set_visitor_cookie(response, vid):
+    response.set_cookie(VISITOR_COOKIE, vid, max_age=400 * 86400, httponly=True, samesite="Lax", secure=request.is_secure)
+
+
+@app.before_request
+def _remember_first_visit():
+    """Remember, in the visitor's session cookie, where they first came from (referring site, campaign tags in
+    the link, first page). A message sent later carries that, which tells us which ads and posts bring students."""
+    if request.method != "GET" or request.blueprint == "admin" or request.endpoint in (None, "static", "media"):
+        return
+    utm = _campaign_tags()
+    ft = session.get("ft")
+    if ft:
+        if not ft.get("s") and utm["utm_source"]:           # the first link had no tags but a later one has
+            ft.update(s=utm["utm_source"], m=utm["utm_medium"], c=utm["utm_campaign"])
+            session["ft"] = ft
+        return
+    session["ft"] = {"r": _external_host(), "s": utm["utm_source"], "m": utm["utm_medium"], "c": utm["utm_campaign"],
+                     "p": request.path[:80]}
+
+
+# ---------- the background writer: location lookups and log writes never slow a page down ----------
+
+_track_queue = queue.Queue(maxsize=3000)
+_track_state = {"thread": None, "warned": False}
+_track_start_lock = threading.Lock()
+
+
+def _track_enqueue(event):
+    with _track_start_lock:
+        thread = _track_state["thread"]
+        if thread is None or not thread.is_alive():
+            thread = _track_state["thread"] = threading.Thread(target=_track_loop, name="tracker", daemon=True)
+            thread.start()
+    try:
+        _track_queue.put_nowait(event)
+    except queue.Full:
+        if not _track_state["warned"]:
+            _track_state["warned"] = True
+            log.warning("The visitor tracking queue is full; new events are dropped until it clears")
+
+
+def _track_loop():
+    while True:
+        event = _track_queue.get()
+        try:
+            _track_process(event)
+        except Exception:
+            log.exception("Visitor tracking failed for one event")
+        finally:
+            _track_queue.task_done()
+
+
+def _track_process(event):
+    row = dict(event["row"])
+    ip = event.get("ip", "")
+    geo = geo_lookup(ip) if ip else None
+    if geo:
+        row.update(geo)
+    kind = event["kind"]
+    if kind == "visit":
+        _append_csv(os.path.join(_analytics_dir(), "visits-" + row["time"][:7] + ".csv"), VISIT_COLUMNS, row)
+    elif kind == "enroll":
+        path = os.path.join(_courses_dir(), event["course"], ENROLL_FILE)
+        if not os.path.isdir(os.path.dirname(path)):
+            return
+        cutoff = (datetime.strptime(row["time"], "%Y-%m-%d %H:%M:%S") - timedelta(minutes=ENROLL_REPEAT_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
+        if any(r.get("visitor_id") == row["visitor_id"] and r.get("time", "") >= cutoff for r in _read_log(path)):
+            return                                     # the same person pressing the button again
+        _append_csv(path, ENROLL_COLUMNS, row)
+    elif kind == "message" and geo:
+        update_message(event["id"], **geo)
+
+
+@app.after_request
+def _track_page_view(response):
+    """One row in the visits log for every page a real visitor opens."""
+    try:
+        if (request.method != "GET" or response.status_code != 200 or response.mimetype != "text/html"
+                or request.blueprint == "admin" or request.endpoint in (None, "static", "media")
+                or not _tracking_allowed() or request.headers.get("Purpose") == "prefetch"):
+            return response
+        vid, new = _visitor_id()
+        device, browser, os_name = _parse_ua(request.headers.get("User-Agent", ""))
+        utm = _campaign_tags()
+        _track_enqueue({"kind": "visit", "ip": request.remote_addr or "", "row": {
+            "time": now_bd().strftime("%Y-%m-%d %H:%M:%S"), "visitor_id": vid, "new_visitor": "1" if new else "0",
+            "ip": request.remote_addr or "", "path": request.path[:120], "referrer": _external_host(),
+            "utm_source": utm["utm_source"], "utm_medium": utm["utm_medium"], "utm_campaign": utm["utm_campaign"],
+            "device": device, "browser": browser, "os": os_name, "language": _language()}})
+        if new:
+            _set_visitor_cookie(response, vid)
+    except Exception:
+        log.exception("Could not record a page view")
+    return response
+
+
+@app.route("/course/<slug>/enroll")
+def course_enroll(slug):
+    """The Enroll buttons point here: the press is recorded under the course, then the visitor goes on to the
+    enrolment link set for the course."""
+    course = next((c for c in load_courses() if c["slug"] == slug), None)
+    link = (course or {}).get("enroll_link", "")
+    if not re.match(r"https?://", link or "", re.I):
+        abort(404)
+    response = redirect(link)
+    if _tracking_allowed():
+        vid, new = _visitor_id()
+        device, browser, os_name = _parse_ua(request.headers.get("User-Agent", ""))
+        ft = session.get("ft") or {}
+        button = request.args.get("b", "")
+        _track_enqueue({"kind": "enroll", "course": slug, "ip": request.remote_addr or "", "row": {
+            "time": now_bd().strftime("%Y-%m-%d %H:%M:%S"), "visitor_id": vid, "button": button if button in ("hero", "side") else "page",
+            "ip": request.remote_addr or "", "device": device, "browser": browser, "os": os_name, "language": _language(),
+            "first_referrer": ft.get("r", ""), "utm_source": ft.get("s", ""), "utm_medium": ft.get("m", ""),
+            "utm_campaign": ft.get("c", ""), "landing_page": ft.get("p", "")}})
+        if new:
+            _set_visitor_cookie(response, vid)
+    return response
+
+
+# ---------- the contact form ----------
+
+def _contact_rate_error(ip):
+    now = time.time()
+    with _msg_hits_lock:
+        for key in [k for k, v in _msg_hits.items() if not v or v[-1] < now - 86400]:
+            _msg_hits.pop(key, None)
+        mine = [t for t in _msg_hits.get(ip, []) if t > now - 3600]
+        today = sum(1 for v in _msg_hits.values() for t in v if t > now - 86400)
+        if len(mine) >= MSG_PER_IP_HOUR or today >= MSG_PER_DAY:
+            return "Too many messages were sent just now. Please try again in a little while."
+    return None
+
+
+def _contact_rate_note(ip):
+    with _msg_hits_lock:
+        _msg_hits.setdefault(ip, []).append(time.time())
+
+
+def _contact_error(form):
+    if not form["name"] or not form["email"] or not form["message"]:
+        return "Please fill out your name, email, and message before sending."
+    if not EMAIL_RE.match(form["email"]):
+        return "That email address does not look right. Please check it."
+    for key in ("name", "email", "message"):
+        if len(form[key]) > MSG_LIMITS[key]:
+            return f"Your {key} is too long (the limit is {MSG_LIMITS[key]} characters)."
+    return None
+
+
+def _build_message(form):
+    ua = request.headers.get("User-Agent", "")
+    device, browser, os_name = _parse_ua(ua)
+    ft = session.get("ft") or {}
+    tz = request.form.get("visitor_timezone", "").strip()
+    ip = request.remote_addr or ""
+    geo = geo_cached(ip) or {}
+    return {
+        "id": secrets.token_hex(4),
+        "received": now_bd().strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "new",
+        "name": form["name"], "email": form["email"], "message": form["message"],
+        "visitor_id": request.cookies.get(VISITOR_COOKIE, "") if re.fullmatch(r"[0-9a-f]{16}", request.cookies.get(VISITOR_COOKIE, "")) else "",
+        "ip": ip,
+        "country": geo.get("country", ""), "region": geo.get("region", ""), "city": geo.get("city", ""), "isp": geo.get("isp", ""),
+        "visitor_timezone": tz if re.fullmatch(r"[A-Za-z0-9_+\-/]{1,60}", tz) else "",
+        "device": device, "browser": browser, "os": os_name, "language": _language(),
+        "first_referrer": ft.get("r", ""), "utm_source": ft.get("s", ""), "utm_medium": ft.get("m", ""),
+        "utm_campaign": ft.get("c", ""), "landing_page": ft.get("p", ""),
+        "user_agent": ua[:200],
+        "_extra": {},
+    }
+
+
 @app.route("/faq", methods=["GET", "POST"])
 def faq():
+    form = {k: "" for k in ("name", "email", "message")}
     if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip()
-        message = request.form.get("message", "").strip()
-        if not name or not email or not message:
-            flash("Please fill out your name, email, and message before sending.", "error")
-        else:
-            flash("Message received! We will reply within a few hours.", "success")
+        form = {k: request.form.get(k, "").strip() for k in form}
+        if request.form.get("website", "").strip():          # the hidden "website" box: only a bot fills it in
+            flash("Message received! Thank you, we will reply by email.", "success")
+            return redirect(url_for("faq"))
+        ip = request.remote_addr or "?"
+        error = _contact_error(form)
+        opened = session.get("faq_ts")
+        if not error and opened and time.time() - opened < MSG_MIN_SECONDS:
+            error = "That was very quick. Please check your message and send it again."
+        if not error:
+            error = _contact_rate_error(ip)
+        row = None
+        if not error:
+            row = _build_message(form)
+            try:
+                saved = add_message(row)
+            except OSError as exc:
+                log.error("Could not store a message (%s)", exc)
+                saved = False
+            if not saved:
+                error = "Sorry, we could not save your message just now. Please try again later."
+        if error:
+            flash(error, "error")
+            return render_template("faq.html", faq_questions=load_faq(), form=form, limits=MSG_LIMITS), 400
+        _contact_rate_note(ip)
+        if not row["country"] and not row["city"] and _geo_enabled():
+            _track_enqueue({"kind": "message", "id": row["id"], "ip": row["ip"], "row": {}})
+        session.pop("faq_ts", None)
+        flash("Message received! Thank you, we will reply by email.", "success")
         return redirect(url_for("faq"))
-    return render_template("faq.html", faq_questions=faq_questions)
+    session["faq_ts"] = time.time()
+    return render_template("faq.html", faq_questions=load_faq(), form=form, limits=MSG_LIMITS)
+
+
+# ---------- reading the visit log (admin "visitors" page) ----------
+
+def _visit_files():
+    try:
+        return sorted(n for n in os.listdir(_analytics_dir()) if re.fullmatch(r"visits-\d{4}-\d\d\.csv", n))
+    except OSError:
+        return []
+
+
+_visit_cache = {"at": 0, "rows": []}
+
+
+def recent_visits(days=30):
+    """Page views of the last `days` days, oldest first (kept for 20 seconds, so a busy admin page stays cheap)."""
+    if time.time() - _visit_cache["at"] > 20 or _visit_cache.get("days") != days:
+        cutoff = (now_bd() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
+        for name in _visit_files()[-2:]:
+            rows.extend(r for r in _read_log(os.path.join(_analytics_dir(), name)) if r.get("time", "") >= cutoff)
+        _visit_cache.update(at=time.time(), rows=rows, days=days)
+    return _visit_cache["rows"]
 
 
 # ===========================================================================
@@ -1683,6 +2398,7 @@ def _admin_context():
     return {
         "csrf_token": _csrf_token(),
         "trash_count": len(_trash_items()) if logged_in else 0,
+        "msg_new": message_counts()["new"] if logged_in else 0,
         "debug": app.debug,
         "admin_since": session.get("admin_since"),
     }
@@ -1921,6 +2637,7 @@ def scan_courses():
             "status": status,
             "added": added_label,
             "title": _text(meta.get("title")) or folder,
+            "enrollments": _count_log(os.path.join(path, ENROLL_FILE)),
             "tagline": _text(meta.get("tagline")),
             "price": _text(meta.get("price")),
             "price_final": final_price,
@@ -1965,8 +2682,14 @@ def _trash_items():
         slug = m.group("slug")
         kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
                 else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX)
-                else "file" if slug.startswith(TRASH_FILE_PREFIX) else "course")
-        if kind == "file":
+                else "file" if slug.startswith(TRASH_FILE_PREFIX)
+                else "message" if slug.startswith(TRASH_MESSAGE_PREFIX) else "course")
+        if kind == "message":
+            row, _ = _read_json_checked(os.path.join(path, "row.json"))
+            row = row or {}
+            slug = slug[len(TRASH_MESSAGE_PREFIX):]
+            title = "message from " + (_text(row.get("name")) or "?") + ": " + _text(row.get("message"))[:50]
+        elif kind == "file":
             origin, _ = _read_json_checked(os.path.join(path, "origin.json"))
             title = "content/" + _text((origin or {}).get("path"))
             slug = _text((origin or {}).get("path"))
@@ -2488,6 +3211,207 @@ def curriculum_template():
                     headers={"Content-Disposition": 'attachment; filename="curriculum-template.csv"'})
 
 
+# ---------- routes: messages (sent through the form on the FAQ page) ----------
+
+def _tally(rows, getter, top=8):
+    counts = {}
+    shown = {}
+    for r in rows:
+        label = " ".join((getter(r) or "").split())
+        if label:                                   # "Dhaka" and "dhaka" are one place; the first spelling is shown
+            key = label.lower()
+            shown.setdefault(key, label)
+            counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    biggest = ranked[0][1] if ranked else 1
+    return [{"label": shown[k], "n": v, "pct": max(4, round(100 * v / biggest))} for k, v in ranked[:top]]
+
+
+def _source(r):
+    return r.get("utm_source") or r.get("first_referrer") or r.get("referrer") or "direct or unknown"
+
+
+def _place(r):
+    return ", ".join(x for x in (r.get("city"), r.get("country")) if x)
+
+
+def _uniq_tally(rows, getter, top=8):
+    """Like _tally, but each visitor counts once (their first row)."""
+    first = {}
+    for r in rows:
+        first.setdefault(r.get("visitor_id") or r.get("ip") or id(r), r)
+    return _tally(list(first.values()), getter, top)
+
+
+def _audience(rows, unique=False):
+    """Where the people come from: what the admins need to plan ads and campaigns."""
+    tally = _uniq_tally if unique else _tally
+    return [t for t in (
+        ("Country", tally(rows, lambda r: r.get("country"))),
+        ("City", tally(rows, lambda r: r.get("city") and _place(r))),
+        ("Network (internet provider)", tally(rows, lambda r: r.get("isp"))),
+        ("Came from", tally(rows, _source)),
+        ("Campaign", tally(rows, lambda r: r.get("utm_campaign"))),
+        ("Device", tally(rows, lambda r: r.get("device"))),
+        ("Browser", tally(rows, lambda r: r.get("browser"))),
+        ("Language", tally(rows, lambda r: r.get("language"))),
+    ) if t[1]]
+
+
+@admin_bp.route("/messages")
+def messages():
+    rows = read_messages()
+    show = request.args.get("show", "all")
+    if show not in ("all", "new", "done"):
+        show = "all"
+    q = request.args.get("q", "").strip()[:100]
+    shown = [r for r in rows if show == "all" or r["status"] == show]
+    if q:
+        needle = q.lower()
+        shown = [r for r in shown if any(needle in (r[c] or "").lower() for c in
+                                         ("name", "email", "message", "country", "city", "isp", "ip"))]
+    shown = list(reversed(shown))[:300]
+    week = (now_bd() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    stats = {"total": len(rows), "new": sum(1 for r in rows if r["status"] == "new"),
+             "done": sum(1 for r in rows if r["status"] == "done"),
+             "week": sum(1 for r in rows if r["received"] >= week)}
+    wanted = {m["visitor_id"] for m in shown if m["visitor_id"]}
+    history = {}
+    for v in recent_visits(30):
+        if v.get("visitor_id") in wanted:
+            history.setdefault(v["visitor_id"], []).append(v)
+    return render_template("admin_messages.html", messages=shown, stats=stats, show=show, q=q, history=history,
+                           place=_place, audience=_audience(rows),
+                           exists=os.path.isfile(_msg_path()), unreadable=messages_file_unreadable())
+
+
+@admin_bp.post("/messages/<msg_id>/status")
+def message_status(msg_id):
+    status = "done" if request.form.get("status") == "done" else "new"
+    if not update_message(msg_id, status=status):
+        flash("That message no longer exists.", "error")
+    return redirect(request.form.get("back") if (request.form.get("back") or "").startswith(ADMIN_PREFIX + "/messages") else url_for("admin.messages"))
+
+
+@admin_bp.post("/messages/<msg_id>/delete")
+def message_delete(msg_id):
+    row = pop_message(msg_id)
+    if row is None:
+        flash("That message no longer exists.", "error")
+        return redirect(url_for("admin.messages"))
+    os.makedirs(_trash_dir(), exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(_trash_dir(), f"{TRASH_MESSAGE_PREFIX}{row['id']}__{stamp}")
+    n = 1
+    while os.path.exists(dest):
+        n += 1
+        dest = os.path.join(_trash_dir(), f"{TRASH_MESSAGE_PREFIX}{row['id']}__{stamp}-{n}")
+    os.makedirs(dest)
+    _atomic_write(os.path.join(dest, "row.json"), json.dumps({c: row.get(c, "") for c in MSG_COLUMNS}, ensure_ascii=False, indent=2))
+    log.info("admin: moved a message to trash")
+    flash("Message moved to trash. You can restore it from the Trash page.", "success")
+    return redirect(url_for("admin.messages"))
+
+
+@admin_bp.route("/messages/download")
+def messages_download():
+    if not os.path.isfile(_msg_path()):
+        flash("There are no messages yet.", "error")
+        return redirect(url_for("admin.messages"))
+    with _data_lock():
+        with open(_msg_path(), "rb") as fh:
+            data = fh.read()
+    resp = Response(data, mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="messages-{now_bd().strftime("%Y-%m-%d")}.csv"'
+    return resp
+
+
+# ---------- routes: visitors (the site-wide tracker) ----------
+
+def visitor_stats():
+    rows = recent_visits(30)
+    fmt = "%Y-%m-%d %H:%M:%S"
+    now = now_bd()
+    uv = lambda rs: len({r.get("visitor_id") for r in rs})
+    by_day = {}
+    for r in rows:
+        by_day.setdefault(r["time"][:10], []).append(r)
+    days = []
+    for i in range(13, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        rs = by_day.get(day, [])
+        days.append({"day": day, "label": day[5:], "visitors": uv(rs), "views": len(rs)})
+    top = max([d["visitors"] for d in days] + [1])
+    for d in days:
+        d["pct"] = round(100 * d["visitors"] / top) if d["visitors"] else 0
+    week = [r for r in rows if r["time"] >= (now - timedelta(days=7)).strftime(fmt)]
+    online = [r for r in rows if r["time"] >= (now - timedelta(minutes=ONLINE_MINUTES)).strftime(fmt)]
+    today = by_day.get(now.strftime("%Y-%m-%d"), [])
+    everyone = {r.get("visitor_id") for r in rows}
+    newcomers = {r.get("visitor_id") for r in rows if r.get("new_visitor") == "1"}
+    return {
+        "online": uv(online), "today_visitors": uv(today), "today_views": len(today),
+        "week_visitors": uv(week), "week_views": len(week), "month_visitors": len(everyone), "month_views": len(rows),
+        "new": len(newcomers & everyone), "returning": len(everyone - newcomers), "days": days,
+        "pages": _tally(rows, lambda r: r.get("path"), 10),
+        "audience": _audience(rows, unique=True),
+        "recent": list(reversed(rows[-40:])),
+    }
+
+
+@admin_bp.route("/visitors")
+def visitors():
+    files = []
+    for name in reversed(_visit_files()):
+        path = os.path.join(_analytics_dir(), name)
+        files.append({"name": name, "month": name[7:14], "size": os.path.getsize(path), "rows": _count_log(path)})
+    return render_template("admin_visitors.html", s=visitor_stats(), files=files, place=_place,
+                           tracking=_env_on("TRACK_VISITORS", True), geo=_geo_enabled(), dnt=_env_on("RESPECT_DNT", True),
+                           online_minutes=ONLINE_MINUTES)
+
+
+@admin_bp.route("/visitors/download")
+def visitors_download():
+    month = request.args.get("month", "")
+    if not re.fullmatch(r"\d{4}-\d\d", month) or not os.path.isfile(os.path.join(_analytics_dir(), f"visits-{month}.csv")):
+        abort(404)
+    with _data_lock():
+        with open(os.path.join(_analytics_dir(), f"visits-{month}.csv"), "rb") as fh:
+            data = fh.read()
+    resp = Response(data, mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="visits-{month}.csv"'
+    return resp
+
+
+# ---------- routes: enrolments of one course ----------
+
+@admin_bp.route("/course/<slug>/enrollments")
+def course_enrollments(slug):
+    path = _course_path(slug)
+    meta, _ = _read_json_checked(os.path.join(path, "meta.json"))
+    rows = _read_log(os.path.join(path, ENROLL_FILE))
+    week = (now_bd() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    stats = {"total": len(rows), "visitors": len({r.get("visitor_id") for r in rows}),
+             "week": sum(1 for r in rows if r.get("time", "") >= week)}
+    return render_template("admin_enrollments.html", slug=slug, title=_text((meta or {}).get("title")) or slug, rows=list(reversed(rows))[:300],
+                           stats=stats, audience=_audience(rows, unique=True), place=_place, exists=bool(rows),
+                           link=_text((meta or {}).get("enroll_link")))
+
+
+@admin_bp.route("/course/<slug>/enrollments/download")
+def course_enrollments_download(slug):
+    path = os.path.join(_course_path(slug), ENROLL_FILE)
+    if not os.path.isfile(path):
+        flash("Nobody has pressed Enroll on this course yet.", "error")
+        return redirect(url_for("admin.course_enrollments", slug=slug))
+    with _data_lock():
+        with open(path, "rb") as fh:
+            data = fh.read()
+    resp = Response(data, mimetype="text/csv; charset=utf-8")
+    resp.headers["Content-Disposition"] = f'attachment; filename="{slug}-enrollments-{now_bd().strftime("%Y-%m-%d")}.csv"'
+    return resp
+
+
 @admin_bp.route("/trash")
 def trash():
     return render_template("admin_trash.html", items=_trash_items())
@@ -2519,19 +3443,22 @@ def system():
         "Courses folder": _courses_dir(),
         "Instructors folder": _instructors_dir(),
         "Webinars folder": _webinars_dir(),
+        "FAQ and messages folder": _faq_dir(),
         "Trash folder": _trash_dir(),
         "Admin URL prefix": ADMIN_PREFIX,
         "Password source": {"env": "ADMIN_PASSWORD env var", "file": "admin_password.txt"}.get(_pw_source, "admin_password.txt (created this run)"),
         "Upload limit": "5 MB per image / 8 MB per request",
         "Session idle timeout": f"{ADMIN_IDLE_SECONDS // 3600} h",
         "Login lockout": f"{_LOGIN_MAX_FAILS} failures = {_LOGIN_LOCK_SECONDS // 60} min",
-        "Server clock": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Visitor tracking": ("on" if _env_on("TRACK_VISITORS", True) else "off (TRACK_VISITORS=off)") + (", honours Do Not Track" if _env_on("RESPECT_DNT", True) else ", ignores Do Not Track"),
+        "Location lookup": "off (GEO_LOOKUP=off)" if not _geo_enabled() else "on: ipwho.is, then ipapi.co (each IP once)",
+        "Trusted proxies": f"{TRUSTED_PROXIES} (visitor IP is " + ("read from X-Forwarded-For" if TRUSTED_PROXIES else "the direct connection; set TRUSTED_PROXIES=1 behind a proxy") + ")",        "Server clock": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Site time (Bangladesh)": now_bd().strftime("%Y-%m-%d %H:%M:%S"),
     }
     return render_template("admin_system.html", info=info, routes=routes, logos=logos, clock=TIME.status(),
                            brand_logo=load_branding()["header"]["file"],
                            logs=_logbook.recent(), instructors=load_instructors(include_hidden=True),
-                           pipeline_count=len(pipeline_courses), faq_count=len(faq_questions))
+                           pipeline_count=len(pipeline_courses), faq_count=len(load_faq()), message_count=len(read_messages()))
 
 
 # ---------- routes: create / edit course ----------
@@ -2759,6 +3686,19 @@ def trash_restore(name):
         log.info("admin: restored '/%s' from the trash", "/".join(parts))
         flash(f"Restored content/{'/'.join(parts)}." , "success")
         return redirect(url_for("admin.files", path="/".join(parts[:-1])))
+    if slug.startswith(TRASH_MESSAGE_PREFIX):
+        row, _ = _read_json_checked(os.path.join(src, "row.json"))
+        if not isinstance(row, dict):
+            flash("Cannot restore: the saved message is damaged. You can still read it in the trash folder.", "error")
+            return redirect(url_for("admin.trash"))
+        row = {c: _text(row.get(c)) for c in MSG_COLUMNS} | {"_extra": {}}
+        if not any(r["id"] == row["id"] for r in read_messages()) and not add_message(row):
+            flash("Cannot restore: messages.csv is full.", "error")
+            return redirect(url_for("admin.trash"))
+        shutil.rmtree(src, ignore_errors=True)
+        log.info("admin: restored a message from the trash")
+        flash("Message restored.", "success")
+        return redirect(url_for("admin.messages"))
     kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
             else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX) else "course")
     root = {"instructor": _instructors_dir, "webinar": _webinars_dir, "course": _courses_dir}[kind]()
@@ -2807,7 +3747,7 @@ def course_duplicate(slug):
     base = (re.sub(r"[^a-z0-9-]+", "-", slug.lower()).strip("-") or "course") + "-copy"
     new_slug = _unique_slug(base)
     new_path = os.path.join(_courses_dir(), new_slug)
-    shutil.copytree(path, new_path)
+    shutil.copytree(path, new_path, ignore=shutil.ignore_patterns(ENROLL_FILE))     # the copy starts without the original's visitors
     meta, err = _read_json_checked(os.path.join(new_path, "meta.json"))
     if meta is not None:
         meta["published"] = False
@@ -3733,6 +4673,7 @@ FB_MAX_DEPTH = 12
 FB_SEARCH_LIMIT = 300
 UNZIP_MAX_ENTRIES = 10000
 TRASH_FILE_PREFIX = "file--"
+TRASH_MESSAGE_PREFIX = "message--"
 _FB_NAME_BAD = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
 _FB_RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 

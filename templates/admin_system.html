@@ -55,7 +55,7 @@
                     <dt>Webinars</dt><dd>content/webinars/&lt;folder&gt;/ (webinar.json, cover.*)</dd>
                     <dt>Logos</dt><dd>{{ logos|length }} file(s) in content/logo/; the header currently shows <b>{{ brand_logo or 'the 📘 fallback' }}</b>. Change it on the <a href="{{ url_for('admin.branding') }}">branding</a> page.{% if logos %}<br><span class="dim">{{ logos|join(', ') }}</span>{% endif %}</dd>
                     <dt>Pipeline cards</dt><dd>{{ pipeline_count }} — in app.py (<span class="dim">pipeline_courses</span>)</dd>
-                    <dt>FAQ entries</dt><dd>{{ faq_count }} — in app.py (<span class="dim">faq_questions</span>)</dd>
+                    <dt>FAQ entries</dt><dd>{{ faq_count }} in <span class="dim">content/faq/faq.csv</span> · {{ message_count }} message(s) in <span class="dim">content/faq/messages.csv</span></dd>
                 </dl>
                 <p class="dim mono-sm" style="margin:.8rem 0 0">Pipeline cards and FAQ are still edited in app.py; only courses are managed from this console.</p>
             </div>

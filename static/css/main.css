@@ -2028,3 +2028,14 @@ span.px > img.px-img {
     .tm-fphoto { width: 150px; }
     .tm-duo-cap b { font-size: 0.95rem; }
 }
+
+/* ---------- contact form on the FAQ page ---------- */
+.form-card select { border: 1px solid #cbd5e1; border-radius: 1rem; padding: 0.95rem 1rem; background: #ffffff; font: inherit; color: inherit; }
+.form-card select:focus { outline: none; border-color: var(--nav-strong); box-shadow: 0 0 0 3px rgba(27, 31, 105, 0.12); }
+.form-more { border: 1px dashed #cbd5e1; border-radius: 1rem; padding: 0.7rem 1rem; }
+.form-more summary { cursor: pointer; font-weight: 600; color: var(--nav); }
+.form-more-fields { display: grid; gap: 1rem; margin-top: 0.9rem; }
+.hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.form-privacy { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+.faq-page > * { min-width: 0; }
+.form-card select, .form-card input, .form-card textarea { width: 100%; min-width: 0; max-width: 100%; }

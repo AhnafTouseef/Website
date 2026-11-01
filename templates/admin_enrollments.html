@@ -1,0 +1,60 @@
+{% extends "admin_base.html" %}
+{% block title %}enrollments · {{ slug }}{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>enrollments</h1>
+    <span class="sub">{{ title }} · content/course/{{ slug }}/enrollments.csv</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('admin.course_edit', slug=slug) }}">← back to course</a>
+        {% if exists %}<a class="a-btn" href="{{ url_for('admin.course_enrollments_download', slug=slug) }}">download .csv</a>{% endif %}
+    </div>
+</div>
+
+<div class="a-note">A row is added each time a visitor presses an <b>Enroll</b> button on this course's page, just before they are sent on to the enrolment link{% if link %} (<b>{{ link }}</b>){% endif %}. It shows who was interested and where they came from. It cannot show whether they finished enrolling there: that happens on the other site. The same visitor pressing again within 30 minutes counts once.</div>
+
+<div class="tiles">
+    <div class="tile"><div class="k">enroll clicks</div><div class="v">{{ stats.total }}</div></div>
+    <div class="tile"><div class="k">different visitors</div><div class="v">{{ stats.visitors }}</div></div>
+    <div class="tile"><div class="k">last 7 days</div><div class="v">{{ stats.week }}</div></div>
+</div>
+
+{% if audience %}
+<section class="panel">
+    <header><b>who is enrolling</b><span>each visitor counted once</span></header>
+    <div class="body aud-grid">
+        {% for title, items in audience %}
+        <div class="aud">
+            <h4>{{ title }}</h4>
+            {% for it in items %}
+            <div class="aud-row"><span class="aud-label" title="{{ it.label }}">{{ it.label }}</span><span class="aud-bar"><i style="width: {{ it.pct }}%"></i></span><span class="aud-n">{{ it.n }}</span></div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="panel">
+    <header><b>enroll clicks</b><span>newest first</span></header>
+    {% if rows %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>time (BD)</th><th>from</th><th>network</th><th>came from</th><th>device</th><th>button</th><th>visitor</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+            <tr class="row">
+                <td class="mono-sm nowrap">{{ r.time }}</td>
+                <td>{{ place(r) or r.ip }}<div class="dim mono-sm">{{ r.ip }}</div></td>
+                <td class="dim">{{ r.isp or '—' }}</td>
+                <td class="dim">{{ r.utm_source or r.first_referrer or 'direct' }}{% if r.utm_campaign %} <span class="dim">/ {{ r.utm_campaign }}</span>{% endif %}</td>
+                <td class="dim">{{ r.device }} · {{ r.browser }} · {{ r.os }}</td>
+                <td class="dim">{{ r.button }}</td>
+                <td class="mono-sm dim">{{ r.visitor_id[:6] }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<div class="empty">nobody has pressed Enroll on this course yet</div>{% endif %}
+</section>
+{% endblock %}

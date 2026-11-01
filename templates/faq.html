@@ -18,22 +18,29 @@
             <div class="accordion-item {% if loop.first %}open{% endif %}">
                 <button type="button" class="accordion-summary">{{ item.question }}</button>
                 <div class="accordion-panel">
-                    <p>{{ item.answer }}</p>
+                    {% for para in item.answer|paragraphs %}<p>{{ para }}</p>{% endfor %}
                 </div>
             </div>
             {% endfor %}
         </div>
+        {% if not faq_questions %}<p class="subtle">Questions and answers will appear here soon. In the meantime, send us a message.</p>{% endif %}
     </div>
     <div class="contact-card">
         <div class="sect-header">
             <h2>Send Us a Message</h2>
         </div>
-        <form method="post" class="form-card">
-            <label>Name<input type="text" name="name" placeholder="Name" required></label>
-            <label>Email<input type="email" name="email" placeholder="Email" required></label>
-            <label>Message<textarea name="message" rows="6" placeholder="Ask anything — pricing, curriculum, whether Python is right for you, anything." required></textarea></label>
+        <form method="post" class="form-card" id="contact-form">
+            <label>Name<input type="text" name="name" placeholder="Name" value="{{ form.name }}" maxlength="{{ limits.name }}" required></label>
+            <label>Email<input type="email" name="email" placeholder="Email" value="{{ form.email }}" maxlength="{{ limits.email }}" required></label>
+            <label>Message<textarea name="message" rows="6" placeholder="Ask anything — pricing, curriculum, whether Python is right for you, anything." maxlength="{{ limits.message }}" required>{{ form.message }}</textarea></label>
+            <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+            <input type="hidden" name="visitor_timezone" value="">
             <button type="submit" class="button button-primary full-width">💬 Send Message</button>
+            <p class="form-privacy">With your message we save your IP address and the approximate place it points to, your device and browser, and the page that brought you here. We use this to understand which students we reach and to prevent spam. It is never shown publicly.</p>
         </form>
+        <script>
+        try { document.querySelector('#contact-form [name=visitor_timezone]').value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+        </script>
         <div class="contact-list">
             <p><strong>Email</strong>: example@example.com</p>
             <p><strong>Instagram</strong>: @example</p>

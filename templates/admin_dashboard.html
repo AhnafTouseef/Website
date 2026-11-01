@@ -58,6 +58,7 @@
                 <td class="nowrap">
                     <a class="a-btn small" href="{{ url_for('admin.course_edit', slug=c.slug) }}">edit</a>
                     {% if c.status == 'published' %}<a class="a-btn small" href="{{ url_for('course_details', slug=c.slug) }}" target="_blank" rel="noopener">view ↗</a>{% endif %}
+                    {% if c.status != 'broken' %}<a class="a-btn small" href="{{ url_for('admin.course_enrollments', slug=c.slug) }}">enrolled{% if c.enrollments %} ({{ c.enrollments }}){% endif %}</a>{% endif %}
                     {% if c.status != 'broken' %}
                     <form class="inline" method="post" action="{{ url_for('admin.course_toggle', slug=c.slug) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
