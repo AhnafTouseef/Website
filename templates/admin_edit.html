@@ -86,6 +86,11 @@
                     <div class="help">empty = the Enroll buttons are hidden.</div>
                 </div>
                 <div class="field span2">
+                    <label class="l" for="f-pay">payment instructions for this course <code>payment_instructions</code></label>
+                    <textarea id="f-pay" name="payment_instructions" rows="3" maxlength="800" placeholder="optional">{{ form.payment_instructions }}</textarea>
+                    <div class="help">optional. Shown in the price box above the Enroll button instead of the site-wide text. Leave empty to use the text (and the bKash number) from the <a href="{{ url_for('admin.contact') }}">contact page</a>.</div>
+                </div>
+                <div class="field span2">
                     <label class="l" for="f-webinar">complimentary webinar link <code>webinar_link</code></label>
                     <input id="f-webinar" type="text" name="webinar_link" value="{{ form.webinar_link }}" placeholder="https://...">
                     <div class="help">empty = “Try free webinar first” opens the site’s own /webinar page.</div>

@@ -35,3 +35,21 @@
     {% if p.photo %}<img src="{{ asset(p.photo) }}" alt="{{ p.name }}" loading="lazy"{% if st.img %} style="{{ st.img }}"{% endif %}>{% else %}<span class="tm-initials" aria-hidden="true">{{ p.name|initials }}</span>{% endif %}
 </div>
 {% endmacro %}
+
+
+{# The ways to reach us, from the contact page of the admin console. Empty parts are left out. #}
+{% macro contact_lines(contact) %}
+{% if contact.has_contact or contact.socials %}
+<div class="contact-list">
+    {% if contact.email %}<p><strong>Email</strong>{% if contact.email_href %}<a href="{{ contact.email_href }}">{{ contact.email }}</a>{% else %}<span>{{ contact.email }}</span>{% endif %}</p>{% endif %}
+    {% if contact.phone %}<p><strong>Phone</strong>{% if contact.phone_href %}<a href="{{ contact.phone_href }}">{{ contact.phone }}</a>{% else %}<span>{{ contact.phone }}</span>{% endif %}</p>{% endif %}
+    {% if contact.whatsapp %}<p><strong>WhatsApp</strong>{% if contact.whatsapp_href %}<a href="{{ contact.whatsapp_href }}" target="_blank" rel="noopener">{{ contact.whatsapp }}</a>{% else %}<span>{{ contact.whatsapp }}</span>{% endif %}</p>{% endif %}
+    {% if contact.address %}<p><strong>Location</strong><span>{{ contact.address }}</span></p>{% endif %}
+    {% if contact.socials %}
+    <div class="contact-social">
+        {% for s in contact.socials %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.label }}</a>{% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endmacro %}

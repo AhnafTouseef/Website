@@ -65,7 +65,9 @@
     </main>
 
     <footer class="site-footer">
-        <div class="container footer-grid">
+        {% set show_contact = contact.has_contact %}
+        {% set show_follow = contact.socials|length > 0 %}
+        <div class="container footer-grid" style="--fcols: {{ 1 + (1 if show_contact else 0) + (1 if show_follow else 0) }}">
             <div class="footer-brand-col logo-{{ brand.footer.align }}" style="--logo-h: {{ brand.footer.height }}px; --logo-h-m: {{ brand.footer.height_mobile }}px">
                 <div class="footer-brand footer-logo-{{ brand.footer.style }}">
                     {% if brand.footer.url %}
@@ -74,32 +76,44 @@
                     <span class="brand-mark">📘</span>
                     {% endif %}
                 </div>
-                <p class="footer-tagline">A learning platform built by graduates, for students. We're just getting started — and we're excited to grow with you.</p>
+                {% if contact.footer_text %}<p class="footer-tagline">{{ contact.footer_text }}</p>{% endif %}
             </div>
-            <div>
-                <h3>Navigate</h3>
+            <nav class="footer-col" aria-label="Footer">
+                <h3>Explore</h3>
                 <ul class="footer-links">
                     <li><a href="{{ url_for('home') }}">Home</a></li>
                     <li><a href="{{ url_for('courses') }}">Courses</a></li>
                     <li><a href="{{ url_for('webinar') }}">Webinar</a></li>
                     <li><a href="{{ url_for('team') }}">Our team</a></li>
-                    <li><a href="{{ url_for('faq') }}">Contact & FAQ</a></li>
+                    <li><a href="{{ url_for('faq') }}">Contact &amp; FAQ</a></li>
+                </ul>
+            </nav>
+            {% if show_contact %}
+            <div class="footer-col footer-col-pair">
+                <h3>Contact</h3>
+                <ul class="footer-contact">
+                    {% if contact.email %}<li><span>Email</span>{% if contact.email_href %}<a href="{{ contact.email_href }}">{{ contact.email }}</a>{% else %}{{ contact.email }}{% endif %}</li>{% endif %}
+                    {% if contact.phone %}<li><span>Phone</span>{% if contact.phone_href %}<a href="{{ contact.phone_href }}">{{ contact.phone }}</a>{% else %}{{ contact.phone }}{% endif %}</li>{% endif %}
+                    {% if contact.whatsapp %}<li><span>WhatsApp</span>{% if contact.whatsapp_href %}<a href="{{ contact.whatsapp_href }}" target="_blank" rel="noopener">{{ contact.whatsapp }}</a>{% else %}{{ contact.whatsapp }}{% endif %}</li>{% endif %}
+                    {% if contact.address %}<li><span>Location</span><address>{{ contact.address }}</address></li>{% endif %}
+                </ul>
+                {% if contact.reply_time %}<p class="footer-reply">{{ contact.reply_time }}</p>{% endif %}
+            </div>
+            {% endif %}
+            {% if show_follow %}
+            <div class="footer-col footer-col-pair">
+                <h3>Follow</h3>
+                <ul class="footer-links footer-social">
+                    {% for s in contact.socials %}
+                    <li><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.label }}<span aria-hidden="true"> ↗</span></a></li>
+                    {% endfor %}
                 </ul>
             </div>
-            <div>
-                <h3>Get in Touch</h3>
-                <p>example@example.com</p>
-                <p>Jashore, Bangladesh</p>
-                <div class="social-icons">
-                    <a href="#" aria-label="Instagram">IG</a>
-                    <a href="#" aria-label="LinkedIn">LI</a>
-                    <a href="mailto:example@example.com" aria-label="Email">✉️</a>
-                </div>
-            </div>
+            {% endif %}
         </div>
         <div class="container footer-bottom">
-            <p>© 2026 {{ site_name }} · Founding Batch</p>
-            <p>Built with 💙 by two fresh grads</p>
+            <p>© {{ year }} {{ site_name }} · Founding Batch</p>
+            {% if contact.footer_note %}<p>{{ contact.footer_note }}</p>{% endif %}
         </div>
     </footer>
 
@@ -115,6 +129,16 @@
             if (min !== Infinity && min <= 86400) setTimeout(function () { location.reload(); }, Math.max(2, min) * 1000);
         })();
         document.addEventListener('click', function (event) {
+            var copy = event.target.closest && event.target.closest('[data-copy]');
+            if (copy) {
+                var text = copy.getAttribute('data-copy'), done = function () {
+                    var old = copy.textContent; copy.textContent = 'Copied'; copy.classList.add('copied');
+                    setTimeout(function () { copy.textContent = old; copy.classList.remove('copied'); }, 1600);
+                };
+                var fallback = function () { var t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); try { if (document.execCommand('copy')) { done(); } } catch (e) {} document.body.removeChild(t); };
+                if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
+                return;
+            }
             if (event.target.matches('.accordion-summary')) {
                 var item = event.target.closest('.accordion-item');
                 if (item) {

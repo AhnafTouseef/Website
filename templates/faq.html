@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_macros.html" import contact_lines with context %}
 {% block content %}
 <section class="page-intro light-section">
     <div class="container intro-copy">
         <span class="section-label">CONTACT & FAQ</span>
         <h1>Got Questions?</h1>
-        <p>We actually read and reply to every message. Usually within a few hours.</p>
+        <p>We actually read and reply to every message.{% if contact.reply_time %} {{ contact.reply_time }}{% endif %}</p>
     </div>
 </section>
 
@@ -41,11 +42,7 @@
         <script>
         try { document.querySelector('#contact-form [name=visitor_timezone]').value = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
         </script>
-        <div class="contact-list">
-            <p><strong>Email</strong>: example@example.com</p>
-            <p><strong>Instagram</strong>: @example</p>
-            <p><strong>LinkedIn</strong>: example</p>
-        </div>
+        {{ contact_lines(contact) }}
     </div>
 </section>
 {% endblock %}

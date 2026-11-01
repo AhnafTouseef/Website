@@ -103,6 +103,19 @@
                 {% endfor %}
             </ul>
             {% endif %}
+            {% set pay_text = course.payment_instructions or contact.payment_instructions %}
+            {% if course.enroll_link and (contact.payment_number or pay_text) %}
+            <div class="pay-box">
+                <h3>How to pay{% if contact.payment_method %} with {{ contact.payment_method }}{% endif %}</h3>
+                {% if contact.payment_number %}
+                <div class="pay-number">
+                    <code>{{ contact.payment_number }}</code>
+                    <button type="button" class="pay-copy" data-copy="{{ contact.payment_number }}">Copy</button>
+                </div>
+                {% endif %}
+                {% for para in pay_text|paragraphs %}<p>{{ para }}</p>{% endfor %}
+            </div>
+            {% endif %}
             {% if course.enroll_link %}
             <a class="button button-primary full-width" href="{{ url_for('course_enroll', slug=course.slug, b='side') }}">Enroll Now →</a>
             {% endif %}

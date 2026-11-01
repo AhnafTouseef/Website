@@ -977,15 +977,16 @@ h2 {
 
 .footer-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 2rem;
-    padding: 3rem 0 1.8rem;
+    grid-template-columns: minmax(0, 1.5fr) repeat(var(--fcols, 2), minmax(0, 1fr));
+    gap: 2.4rem;
+    padding: 3.2rem 0 2rem;
     color: #f8fafc;
 }
 
 .site-footer {
     background: #141753;
     color: #ffffff;
+    border-top: 4px solid #f59e0b;
 }
 
 .footer-brand {
@@ -1013,22 +1014,6 @@ h2 {
 
 .footer-links a {
     color: #dbeafe;
-}
-
-.social-icons {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 1rem;
-}
-
-.social-icons a {
-    width: 2.4rem;
-    height: 2.4rem;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.12);
-    color: #ffffff;
 }
 
 .footer-bottom {
@@ -2039,3 +2024,37 @@ span.px > img.px-img {
 .form-privacy { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
 .faq-page > * { min-width: 0; }
 .form-card select, .form-card input, .form-card textarea { width: 100%; min-width: 0; max-width: 100%; }
+
+
+/* ---------- footer: columns for explore, contact and follow (the contact and follow columns only exist when filled in the admin) ---------- */
+.footer-col h3 { margin: 0 0 1.1rem; color: #fbbf24; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.footer-links a, .footer-contact a { transition: color 0.15s ease; }
+.footer-links a:hover, .footer-contact a:hover { color: #ffffff; text-decoration: underline; text-underline-offset: 4px; }
+.footer-contact { list-style: none; margin: 0; padding: 0; }
+.footer-contact li { margin: 0 0 1rem; color: #e0e7ff; overflow-wrap: anywhere; }
+.footer-contact li > span { display: block; margin-bottom: 0.15rem; color: #a5b4fc; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.footer-contact a { color: #ffffff; font-weight: 600; }
+.footer-contact address { font-style: normal; white-space: pre-line; color: #e0e7ff; }
+.footer-reply { margin: 0.2rem 0 0; color: #c7d2fe; font-size: 0.88rem; line-height: 1.5; }
+.footer-social a { color: #ffffff; font-weight: 600; }
+.footer-social a span { color: #fbbf24; }
+.footer-bottom p { margin: 0; }
+
+/* ---------- contact details on the FAQ page ---------- */
+.contact-list p { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.6rem; align-items: baseline; }
+.contact-list p strong { color: var(--nav); font-size: 0.92rem; }
+.contact-list p a { color: var(--nav-strong, #1b1f69); font-weight: 600; overflow-wrap: anywhere; }
+.contact-list p a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.contact-list p span { overflow-wrap: anywhere; white-space: pre-line; }
+.contact-social { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.1rem; }
+.contact-social a { padding: 0.35rem 0.9rem; border: 1px solid var(--border); border-radius: 999px; color: var(--nav); font-size: 0.88rem; font-weight: 600; background: #ffffff; transition: background 0.15s ease; }
+.contact-social a:hover { background: #f1f5f9; }
+
+/* ---------- "How to pay" box above the Enroll button ---------- */
+.pay-box { margin: 1.1rem 0 1.2rem; padding: 1rem 1.1rem; border-radius: 1rem; background: #fffbeb; border: 1px solid #fde68a; text-align: left; }
+.pay-box h3 { margin: 0 0 0.65rem; font-size: 0.82rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #92400e; }
+.pay-number { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.6rem; padding: 0.55rem 0.55rem 0.55rem 0.85rem; border: 1px dashed #f59e0b; border-radius: 0.8rem; background: #ffffff; }
+.pay-number code { min-width: 0; overflow-wrap: anywhere; font-size: 1.15rem; font-weight: 700; letter-spacing: 0.04em; color: var(--nav); }
+.pay-copy { flex: none; border: 0; border-radius: 999px; padding: 0.4rem 0.9rem; background: #141753; color: #ffffff; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+.pay-copy.copied { background: #15803d; }
+.pay-box p { margin: 0.45rem 0 0; color: #44403c; font-size: 0.9rem; line-height: 1.55; }

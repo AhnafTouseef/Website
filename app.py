@@ -438,8 +438,15 @@ def _discount_info(meta):
 
 # Soft background colours for the cards on the Courses page. Assigned from the folder name, so a
 # course keeps its colour between page loads, and a card never matches the ones right next to it.
-CARD_TINTS = ["#e8f1ff", "#e8f8ee", "#fff1de", "#f3e8ff", "#ffe8ee",
-              "#e4f6f8", "#fffbd9", "#eaf0ff", "#eef8dc", "#ffe9e0"]
+CARD_TINTS = [
+    "#82d8be", "#ddeaa8", "#eaa8a8", "#dda8ea", "#a8c3ea",
+    "#d9dbff", "#e4f6f8", "#ead0a8", "#d89c82", "#add882",
+    "#e0fffd", "#ad82d8", "#d8829c", "#82bed8", "#b6eaa8",
+    "#d882d0", "#e8f8ee", "#d8d082", "#a8eac3", "#ffdede",
+    "#82d88a", "#eaa8d0", "#ffe8ee", "#efedf5", "#eaf0ff",
+    "#eef8dc", "#828ad8", "#e8f1ff", "#f3e8ff", "#a8eaea"
+]
+
 
 
 def assign_tints(course_list):
@@ -757,6 +764,7 @@ def load_courses():
             "start_date": _text(meta.get("start_date")),
             "enroll_link": _text(meta.get("enroll_link")),
             "webinar_link": _text(meta.get("webinar_link")),
+            "payment_instructions": _text(meta.get("payment_instructions")),
             "features": _text_list(meta.get("features")),
             "learn": _text_list(meta.get("what_you_will_learn")),
             "instructors": team,
@@ -1429,6 +1437,159 @@ def load_branding():
 @app.context_processor
 def site_context():
     return {"brand": load_branding(), "asset": asset_url, "site_name": SITE_NAME}
+
+
+# ---------------------------------------------------------------------------
+# Contact details, footer text and payment instructions: content/site/contact.json
+#
+# Everything a visitor sees about how to reach us (footer, FAQ page) and how to pay (the box above the Enroll
+# button) comes from this one file, edited in the admin console under "contact". Empty fields are simply not
+# shown anywhere. Nothing about it is hard-coded in Python or in the templates.
+# ---------------------------------------------------------------------------
+
+CONTACT_FILE = "contact.json"
+DEFAULT_CALLING_CODE = "880"          # a WhatsApp number written as 01XXXXXXXXX becomes 8801XXXXXXXXX for the wa.me link
+SOCIALS = [
+    # key, label, hosts the link may point to, what a bare @handle expands to ("" = handles are not accepted)
+    ("facebook", "Facebook", ("facebook.com", "fb.com", "fb.me", "m.me"), ""),
+    ("instagram", "Instagram", ("instagram.com",), "https://instagram.com/"),
+    ("youtube", "YouTube", ("youtube.com", "youtu.be"), ""),
+    ("linkedin", "LinkedIn", ("linkedin.com",), ""),
+    ("tiktok", "TikTok", ("tiktok.com",), "https://www.tiktok.com/@"),
+    ("telegram", "Telegram", ("t.me", "telegram.me"), "https://t.me/"),
+    ("x", "X (Twitter)", ("x.com", "twitter.com"), "https://x.com/"),
+    ("github", "GitHub", ("github.com",), "https://github.com/"),
+]
+CONTACT_DEFAULTS = {
+    "email": "", "phone": "", "whatsapp": "", "address": "",
+    "reply_time": "Usually within a few hours.",
+    "footer_text": "A learning platform built by graduates, for students. We're just getting started — and we're excited to grow with you.",
+    "footer_note": "Built with 💙 by two fresh grads",
+    "payment_method": "bKash", "payment_number": "", "payment_instructions": "",
+    **{key: "" for key, *_ in SOCIALS},
+}
+CONTACT_LIMITS = {"email": 150, "phone": 30, "whatsapp": 30, "address": 200, "reply_time": 120, "footer_text": 300,
+                  "footer_note": 120, "payment_method": 30, "payment_number": 40, "payment_instructions": 800}
+SOCIAL_LIMIT = 200
+
+
+def _site_dir():
+    return os.path.join(CONTENT_DIR, "site")
+
+
+def _digits(text):
+    return re.sub(r"\D", "", text or "")
+
+
+def _whatsapp_digits(text):
+    """International digits for a wa.me link: 01712345678 -> 8801712345678, +880 1712-345678 -> 8801712345678."""
+    d = _digits(text)
+    if (text or "").strip().startswith("00"):
+        d = d[2:]
+    elif d.startswith("0") and not (text or "").strip().startswith("+"):
+        d = DEFAULT_CALLING_CODE + d[1:]
+    return d
+
+
+def _social_url(key, raw):
+    """(url, error) for one social field. Accepts a full link, a link without https://, or (where it is
+    unambiguous) an @handle. The link must really point at that platform, so a typo cannot send visitors elsewhere."""
+    raw = (raw or "").strip()
+    if not raw:
+        return "", None
+    _, label, hosts, handle_base = next(s for s in SOCIALS if s[0] == key)
+    if raw.startswith("@") and handle_base:
+        raw = handle_base + raw[1:].strip("/")
+    elif not re.match(r"^[a-z][a-z0-9+.-]*://", raw, re.I):
+        if re.match(r"^(javascript|data|vbscript|file|mailto|tel):", raw, re.I):
+            return raw, f"{label}: only web links (https://…) are allowed."
+        raw = "https://" + raw
+    if len(raw) > SOCIAL_LIMIT:
+        return raw, f"{label}: the link is too long."
+    if not URL_RE.match(raw):
+        return raw, f"{label}: that is not a web link (it should look like https://…)."
+    try:
+        host = (urlsplit(raw).hostname or "").lower()
+    except ValueError:
+        return raw, f"{label}: that is not a valid link."
+    if not any(host == h or host.endswith("." + h) for h in hosts):
+        return raw, f"{label}: the link should be on {' or '.join(hosts)} (it points to {host or 'nowhere'})."
+    return raw, None
+
+
+def clean_contact(raw):
+    """A complete, valid settings dict from whatever was stored (anything missing or wrong falls back to the default)."""
+    raw = raw if isinstance(raw, dict) else {}
+    out = {}
+    for key, default in CONTACT_DEFAULTS.items():
+        value = raw.get(key, default)
+        value = value.replace("\r\n", "\n").strip() if isinstance(value, str) else default
+        if key in CONTACT_LIMITS:
+            value = value[:CONTACT_LIMITS[key]]
+        elif len(value) > SOCIAL_LIMIT:
+            value = ""
+        out[key] = value
+    return out
+
+
+def read_contact():
+    data, err = _read_json_checked(os.path.join(_site_dir(), CONTACT_FILE))
+    if err and err != "file not found":
+        log.error("Could not read content/site/%s (%s); the defaults are used", CONTACT_FILE, err)
+    return clean_contact(data)
+
+
+def load_contact():
+    """Settings plus what the templates need: links, the list of social accounts, and which parts are filled in."""
+    c = read_contact()
+    digits = _whatsapp_digits(c["whatsapp"])
+    phone = re.sub(r"[^\d+]", "", c["phone"])
+    c["email_href"] = "mailto:" + c["email"] if c["email"] and EMAIL_RE.match(c["email"]) else ""
+    c["phone_href"] = "tel:" + phone if len(_digits(c["phone"])) >= 6 else ""
+    c["whatsapp_href"] = f"https://wa.me/{digits}" if 8 <= len(digits) <= 15 else ""
+    c["socials"] = []
+    for key, label, *_ in SOCIALS:
+        url, err = _social_url(key, c[key])
+        if url and not err:
+            c["socials"].append({"key": key, "label": label, "url": url})
+    c["has_contact"] = bool(c["email"] or c["phone"] or c["whatsapp"] or c["address"])
+    c["has_payment"] = bool(c["payment_number"] or c["payment_instructions"])
+    return c
+
+
+def _read_contact_submission():
+    """(settings, errors) from the posted admin form."""
+    f = request.form
+    settings = {key: f.get(key, "").replace("\r\n", "\n").strip() for key in CONTACT_DEFAULTS}
+    errors = []
+    for key, limit in CONTACT_LIMITS.items():
+        if len(settings[key]) > limit:
+            errors.append(f"{key.replace('_', ' ')} is too long (the limit is {limit} characters).")
+    if settings["email"] and not EMAIL_RE.match(settings["email"]):
+        errors.append("Email does not look like an email address.")
+    for key, label in (("phone", "Phone"), ("whatsapp", "WhatsApp")):
+        value = settings[key]
+        if value and not re.fullmatch(r"[+\d][\d\s\-().]*", value):
+            errors.append(f"{label}: use digits, spaces, + - ( ) only.")
+        elif value and key == "phone" and len(_digits(value)) < 6:
+            errors.append("Phone number is too short.")
+        elif value and key == "whatsapp" and not 8 <= len(_whatsapp_digits(value)) <= 15:
+            errors.append("WhatsApp number is too short or too long (include the number as you would dial it, for example 01712345678 or +8801712345678).")
+    if len(settings["address"].splitlines()) > 3:
+        errors.append("Address can have at most 3 lines.")
+    for key, label, *_ in SOCIALS:
+        url, err = _social_url(key, settings[key])
+        if err:
+            errors.append(err)
+        elif url:
+            settings[key] = url
+    return settings, errors
+
+
+@app.context_processor
+def contact_context():
+    return {"contact": load_contact(), "year": now_bd().year}
+
 
 
 @app.route("/")
@@ -2238,7 +2399,7 @@ TRASH_INSTRUCTOR_PREFIX = "instructor--"      # course slugs never contain "--",
 TRASH_RE = re.compile(r"^(?P<slug>[^/\\\x00]+?)__(?P<ts>\d{8}-\d{6})(?:-\d+)?$")
 
 STRING_KEYS = ["title", "tagline", "subtitle", "description", "duration", "capacity",
-               "certificate", "price", "start_date", "enroll_link", "webinar_link"]
+               "certificate", "price", "start_date", "enroll_link", "webinar_link", "payment_instructions"]
 LIST_KEYS = ["features", "what_you_will_learn", "instructors"]
 META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published", "thumb_style"]
 
@@ -3519,6 +3680,8 @@ def _read_submission(creating, existing_meta, added_default):
     for key in ("enroll_link", "webinar_link"):
         if form[key] and not URL_RE.match(form[key]):
             errors.append(f"{key} must start with http:// or https:// (or be left empty).")
+    if len(form["payment_instructions"]) > CONTACT_LIMITS["payment_instructions"]:
+        errors.append(f"Payment instructions are too long (the limit is {CONTACT_LIMITS['payment_instructions']} characters).")
     if form["added"] and not _valid_date(form["added"]):
         errors.append("Added date must look like 2026-10-26 (year-month-day), or be left empty.")
     d100 = None
@@ -4610,6 +4773,24 @@ def _read_branding_submission():
         elif data:
             uploads[part] = (ext, data)
     return settings, uploads, errors
+
+
+# ---------- routes: contact details, footer text, payment instructions ----------
+
+@admin_bp.route("/contact", methods=["GET", "POST"])
+def contact():
+    errors, status = [], 200
+    form = read_contact()
+    if request.method == "POST":
+        settings, errors = _read_contact_submission()
+        if not errors:
+            os.makedirs(_site_dir(), exist_ok=True)
+            _atomic_write(os.path.join(_site_dir(), CONTACT_FILE), json.dumps(clean_contact(settings), indent=4, ensure_ascii=False) + "\n")
+            log.info("admin: saved contact details")
+            flash("Saved. The footer, the FAQ page and the payment box show the new details now.", "success")
+            return redirect(url_for("admin.contact"))
+        form, status = settings, 400
+    return render_template("admin_contact.html", form=form, errors=errors, socials=SOCIALS, limits=CONTACT_LIMITS, live=load_contact()), status
 
 
 @admin_bp.route("/branding", methods=["GET", "POST"])

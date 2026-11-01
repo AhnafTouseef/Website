@@ -248,3 +248,19 @@
     .team-grid.cards-2 .instructor-photo { width: 3.6rem; height: 3.6rem; }
     .team-grid.cards-2 .team-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
+
+
+/* ---------- footer on tablets and phones: brand on top, then the link columns ---------- */
+@media (max-width: 980px) {
+    .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem 1.5rem; }
+    .footer-grid .footer-brand-col { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+    /* phones: brand and Explore take the full width, Contact and Follow sit side by side (one alone takes the full row) */
+    .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.75rem 1.25rem; }
+    .footer-grid > .footer-col:not(.footer-col-pair) { grid-column: 1 / -1; }
+    .footer-grid > .footer-col-pair:last-child:nth-child(odd) { grid-column: 1 / -1; }
+    .footer-col-pair .footer-contact li { font-size: 0.92rem; }
+    .footer-bottom { flex-direction: column; gap: 0.3rem; }
+    .contact-list p { grid-template-columns: 1fr; gap: 0.1rem; }
+}

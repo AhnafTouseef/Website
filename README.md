@@ -13,7 +13,7 @@ A Flask-based site and admin console for the Skillwaves learning platform.
 | Folder | What lives there |
 |---|---|
 | `static/css`, `static/js` | the site's skeleton: the only things in `static/` |
-| `content/` | everything dynamic: `course/`, `instructors/`, `webinars/`, `images/`, `logo/` and the default `webinar.jpg`. Served to visitors at `/media/...` (the data files `.json` and `curriculum.csv`, and anything starting with a dot, are never served) |
+| `content/` | everything dynamic: `course/`, `instructors/`, `webinars/`, `images/`, `logo/`, `site/` (contact settings), `faq/`, `analytics/` and the default `webinar.jpg`. Served to visitors at `/media/...` (the data files `.json` and `curriculum.csv`, and anything starting with a dot, are never served) |
 | `templates/` | page templates |
 | `_trash/`, `_import/` | soft-deleted items and staged imports (created when needed, never served) |
 
@@ -63,6 +63,16 @@ Visitors are never asked for more than name, email and message. Everything else 
 - **Env switches:** `TRACK_VISITORS=off` (no visit or enrollment rows), `GEO_LOOKUP=off` (no outside lookups, location columns stay empty), `RESPECT_DNT=off` (ignore Do Not Track), `TRUSTED_PROXIES=1` (set the number of reverse proxies in front of the app: nginx, Cloudflare, a hosting platform. Without it every IP is the proxy's).
 - **Privacy:** these files hold IP addresses and emails. They are never served at `/media/` and not shown on the website, but they are inside the transfer export (so they move with the site). Keep them out of GitHub: add `content/faq/messages.csv`, `content/analytics/`, `content/course/*/enrollments.csv` and `content/.datalock` to `.gitignore`. Consider a short privacy page that tells visitors what is recorded.
 - Form protection: a hidden field, a minimum fill-in time, 5 messages per hour per IP. Files are plain CSV (UTF-8 with BOM) and are written under a lock, so simultaneous visitors cannot corrupt them.
+
+## Contact details, footer and payment instructions
+
+All of it lives in one file, `content/site/contact.json`, edited in the admin **contact** section (nothing is hard-coded in Python or in the templates). A field left empty is simply not shown anywhere.
+
+- **Ways to reach you** (email, phone, WhatsApp number, location, reply promise) show in the footer of every page and in the contact box on the FAQ page. The email becomes a mail link, the phone a tap-to-call link, the WhatsApp number a `wa.me` chat link (`01XXXXXXXXX` is read as a Bangladesh number, `+880...`).
+- **Social accounts** (Facebook, Instagram, YouTube, LinkedIn, TikTok, Telegram, X, GitHub): paste the link, or an `@handle` for Instagram, TikTok, Telegram, X and GitHub. A link must point at its own platform, so a typo cannot send visitors elsewhere; `javascript:` and similar links are refused. Filled ones appear in the footer's Follow column and on the FAQ page.
+- **Footer text** under the logo and the small **bottom line**. The `(c) year` and the site name are automatic.
+- **Payment:** the "How to pay with bKash" box above the Enroll button on every course page: a number with a Copy button and the instructions (a blank line starts a new paragraph). A single course can use its own instructions in its editor (`payment_instructions` in `meta.json`); the site-wide number is still shown. The box is hidden while the course has no enroll link, or while both the number and the instructions are empty.
+- The file is not served at `/media/`. A missing or damaged file falls back to the defaults and the page still opens in admin so it can be saved again.
 
 ## Phone layout: cards in two columns
 
@@ -245,6 +255,7 @@ What it does:
 | + new / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; live `meta.json` preview; Ctrl+S to save |
 | instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
 | webinars | add, edit, hide and delete live sessions (see below) |
+| contact | email, phone, WhatsApp, location, social accounts, footer text, bKash number and payment instructions |
 | branding | logo, hero picture and hero text (see below) |
 | trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `content/`), restorable or deletable forever |
 | files | the file browser (below) |

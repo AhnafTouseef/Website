@@ -1,0 +1,119 @@
+{% extends "admin_base.html" %}
+{% block title %}contact{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>contact</h1>
+    <span class="sub">how people reach you, the footer text and the payment instructions · content/site/contact.json</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('faq') }}" target="_blank" rel="noopener">view FAQ page ↗</a>
+    </div>
+</div>
+
+{% if errors %}
+<div class="errors"><b>Not saved. Fix these first:</b><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<div class="a-note">Everything on this page appears on the public site: the <b>footer of every page</b>, the <b>FAQ &amp; contact page</b>, and the <b>payment box above the Enroll button</b> on course pages. <b>Leave a field empty and it is simply not shown.</b></div>
+
+<form method="post" id="contact-admin" autocomplete="off">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+<section class="panel">
+    <header><b>ways to reach you</b><span>shown in the footer and on the FAQ page</span></header>
+    <div class="body f-grid">
+        <div class="field">
+            <label class="l" for="f-email">email <code>email</code></label>
+            <input id="f-email" type="text" name="email" value="{{ form.email }}" inputmode="email" maxlength="{{ limits.email }}" placeholder="hello@yoursite.com">
+        </div>
+        <div class="field">
+            <label class="l" for="f-phone">phone <code>phone</code></label>
+            <input id="f-phone" type="text" name="phone" value="{{ form.phone }}" inputmode="tel" maxlength="{{ limits.phone }}" placeholder="+880 1XXX-XXXXXX">
+            <div class="help">becomes a tap-to-call link on phones.</div>
+        </div>
+        <div class="field">
+            <label class="l" for="f-wa">WhatsApp number <code>whatsapp</code></label>
+            <input id="f-wa" type="text" name="whatsapp" value="{{ form.whatsapp }}" inputmode="tel" maxlength="{{ limits.whatsapp }}" placeholder="01XXXXXXXXX">
+            <div class="help">opens a WhatsApp chat. 01XXXXXXXXX is read as a Bangladesh number (+880).</div>
+        </div>
+        <div class="field">
+            <label class="l" for="f-address">location <code>address</code></label>
+            <textarea id="f-address" name="address" rows="2" maxlength="{{ limits.address }}" placeholder="Jashore, Bangladesh">{{ form.address }}</textarea>
+            <div class="help">up to 3 lines.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-reply">reply promise <code>reply_time</code></label>
+            <input id="f-reply" type="text" name="reply_time" value="{{ form.reply_time }}" maxlength="{{ limits.reply_time }}" placeholder="Usually within a few hours.">
+            <div class="help">shown under the contact details and in the FAQ page heading. Only promise what you can keep.</div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>social accounts</b><span>paste the link (or an @handle where it is unambiguous)</span></header>
+    <div class="body f-grid">
+        {% for key, label, hosts, handle in socials %}
+        <div class="field">
+            <label class="l" for="f-{{ key }}">{{ label }} <code>{{ key }}</code></label>
+            <input id="f-{{ key }}" type="text" name="{{ key }}" value="{{ form[key] }}" maxlength="200" placeholder="{{ 'https://' ~ hosts[0] ~ '/…' }}">
+        </div>
+        {% endfor %}
+        <div class="field span2"><div class="help">each link must point to its own platform, so a typo can never send visitors somewhere else.</div></div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>footer</b><span>the two lines of text in the footer</span></header>
+    <div class="body f-grid">
+        <div class="field span2">
+            <label class="l" for="f-ftext">footer text <code>footer_text</code></label>
+            <textarea id="f-ftext" name="footer_text" rows="2" maxlength="{{ limits.footer_text }}">{{ form.footer_text }}</textarea>
+            <div class="help">under the logo. Empty = nothing is shown there.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-fnote">bottom line <code>footer_note</code></label>
+            <input id="f-fnote" type="text" name="footer_note" value="{{ form.footer_note }}" maxlength="{{ limits.footer_note }}">
+            <div class="help">the small text at the right of the bottom bar (the © line on the left is automatic).</div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>payment</b><span>the "How to pay" box above the Enroll button on every course page</span></header>
+    <div class="body f-grid">
+        <div class="field">
+            <label class="l" for="f-pm">payment method <code>payment_method</code></label>
+            <input id="f-pm" type="text" name="payment_method" value="{{ form.payment_method }}" maxlength="{{ limits.payment_method }}" placeholder="bKash">
+        </div>
+        <div class="field">
+            <label class="l" for="f-pn">number to pay to <code>payment_number</code></label>
+            <input id="f-pn" type="text" name="payment_number" value="{{ form.payment_number }}" maxlength="{{ limits.payment_number }}" placeholder="01XXXXXXXXX">
+            <div class="help">shown big, with a Copy button.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-pi">instructions <code>payment_instructions</code></label>
+            <textarea id="f-pi" name="payment_instructions" rows="5" maxlength="{{ limits.payment_instructions }}" placeholder="Send the course fee with “Send Money”, write your name as the reference, then paste the transaction ID in the enrollment form.">{{ form.payment_instructions }}</textarea>
+            <div class="help">a blank line starts a new paragraph. A single course can have its own text in its editor. <b>The box is hidden while both the number and the instructions are empty.</b></div>
+        </div>
+    </div>
+</section>
+
+<div class="savebar">
+    <button class="a-btn primary" type="submit">save</button>
+    <span class="dim">Ctrl+S also saves</span>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var form = document.getElementById('contact-admin'), dirty = false;
+    form.addEventListener('input', function () { dirty = true; });
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); dirty = false; form.submit(); }
+    });
+})();
+</script>
+{% endblock %}
