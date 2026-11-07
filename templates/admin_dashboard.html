@@ -102,15 +102,6 @@
     <div class="empty">content/course/ has no course folders yet. <a href="{{ url_for('admin.course_new') }}">Create the first one →</a></div>
     {% endif %}
 </section>
-
-<section class="panel">
-    <header><b>content/instructors/</b><span>{{ instructors|length }} profile(s)</span></header>
-    <div class="body">
-        <span class="dim">Instructor profiles have their own section now.</span>
-        <a class="a-btn small" href="{{ url_for('admin.instructors_list') }}">manage instructors →</a>
-        <a class="a-btn small primary" href="{{ url_for('admin.instructor_new') }}">+ add instructor</a>
-    </div>
-</section>
 {% endblock %}
 
 {% block scripts %}

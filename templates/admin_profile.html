@@ -1,0 +1,363 @@
+{% extends "admin_base.html" %}
+{% from "_admin_macros.html" import img_style_panel %}
+{% block title %}Profile{% endblock %}
+
+{% macro align_seg(name, value) %}
+<div class="seg" role="radiogroup">
+    {% for key, label in (('left', 'left'), ('center', 'centre'), ('right', 'right')) %}
+    <label><input type="radio" name="{{ name }}" value="{{ key }}" {% if value == key %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro num(name, label, value, key, unit) %}
+<div class="field">
+    <label class="l" for="f-{{ name }}">{{ label }}</label>
+    <div class="slider-line">
+        <input type="range" data-pair="f-{{ name }}" min="{{ limits[key][0] }}" max="{{ limits[key][1] }}" value="{{ value }}" aria-label="{{ label }} slider">
+        <input id="f-{{ name }}" type="number" name="{{ name }}" min="{{ limits[key][0] }}" max="{{ limits[key][1] }}" value="{{ value }}">
+    </div>
+    <div class="help">{{ unit }}</div>
+</div>
+{% endmacro %}
+
+{% macro logo_panel(part, title, hint) %}
+{% set box = bform[part] %}
+<section class="panel" id="panel-{{ part }}">
+    <header><b>{{ title }}</b><span>{{ hint }}</span></header>
+    <div class="body">
+        <div class="f-grid">
+            <div class="field span2">
+                <label class="l" for="f-{{ part }}-logo">which file</label>
+                <select id="f-{{ part }}-logo" name="{{ part }}_logo">
+                    <option value="" data-url="{{ live[part].url or '' }}" {% if not box.logo %}selected{% endif %}>{{ '(automatic: one of the files below, picked at random)' if part == 'header' else '(same as the header logo)' }}</option>
+                    {% for f in files %}<option value="{{ f }}" data-url="{{ asset('logo/' ~ f) }}" {% if box.logo == f %}selected{% endif %}>{{ f }}</option>{% endfor %}
+                </select>
+                <div class="help">Every picture in content/logo/ is listed. Uploading below adds a new one and selects it.</div>
+            </div>
+            <div class="field span2">
+                <label class="l" for="f-{{ part }}-file">upload a new one <span class="opt">optional</span></label>
+                <input id="f-{{ part }}-file" class="plain" type="file" name="{{ part }}_file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,.svg">
+                <div class="help">PNG, JPG, WEBP, GIF, or <b>SVG</b> (vector, stays sharp at any size) · max 5 MB (SVG: 1 MB). The old uploaded {{ part }} file is replaced. An SVG that could run code or load other files is refused.</div>
+                <div class="up-status" id="{{ part }}-status" role="status" aria-live="polite"></div>
+            </div>
+            {{ num(part ~ '_height', 'height', box.height, 'height', 'pixels on a computer screen · width follows the picture') }}
+            {{ num(part ~ '_height_mobile', 'height on phones', box.height_mobile, 'height_mobile', 'pixels below 980 px screen width') }}
+            <div class="field">
+                <label class="l">alignment</label>
+                {{ align_seg(part ~ '_align', box.align) }}
+                <div class="help">{{ 'Centre puts the logo on its own line above the menu.' if part == 'header' else 'Moves the logo and the sentence under it.' }}</div>
+            </div>
+            {% if part == 'footer' %}
+            <div class="field">
+                <label class="l">on the dark footer</label>
+                <div class="seg" role="radiogroup">
+                    {% for key, label in (('plain', 'as it is'), ('plate', 'on a white plate'), ('white', 'turned all white')) %}
+                    <label><input type="radio" name="footer_style" value="{{ key }}" {% if box.style == key %}checked{% endif %}> {{ label }}</label>
+                    {% endfor %}
+                </div>
+                <div class="help">A logo with dark letters disappears on the navy footer: use the plate, or turn it white (single-colour logos only).</div>
+            </div>
+            {% endif %}
+        </div>
+        {{ img_style_panel(part ~ '_img', box.img, 'logo', live[part].url or '', '#f-' ~ part ~ '-file') }}
+        <div class="pv" style="margin-top:.9rem">
+            <div class="pv-{{ 'head' if part == 'header' else 'foot' }} {{ box.align[0] }}{{ ' ' ~ box.style if part == 'footer' }}" id="pv-{{ part }}">
+                <img class="pv-logo" id="pv-{{ part }}-img" alt="" {% if live[part].url %}src="{{ live[part].url }}"{% else %}hidden{% endif %} style="height: {{ box.height }}px">
+                <span class="pv-none" id="pv-{{ part }}-none" {% if live[part].url %}hidden{% endif %}>no logo file yet</span>
+            </div>
+            <div class="pv-note">Preview at computer size. The real page can be a little different because of the surrounding menu.</div>
+        </div>
+    </div>
+</section>
+{% endmacro %}
+
+{% block content %}
+<div class="a-title">
+    <h1>Profile</h1>
+    <span class="sub">how the site presents itself: logos, the home slide, contact details, footer text and payment instructions · one Save button for everything</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('home') }}" target="_blank" rel="noopener">view site ↗</a>
+        <a class="a-btn" href="{{ url_for('faq') }}" target="_blank" rel="noopener">view FAQ page ↗</a>
+    </div>
+</div>
+
+{% if errors %}
+<div class="errors"><b>Not saved. Fix these first:</b><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<form method="post" action="{{ url_for('admin.profile') }}" enctype="multipart/form-data" id="editor" autocomplete="off">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+<h2 class="a-section" id="branding">Branding <span>logos and the home slider's brand slide · shown on every page</span></h2>
+
+{{ logo_panel('header', 'header logo', 'top of every page') }}
+{{ logo_panel('footer', 'footer logo', 'bottom of every page') }}
+
+{% set s = bform.slide %}
+<section class="panel" id="panel-slide">
+    <header><b>home slider: brand slide</b><span>the first slide of the home page. With webinars planned, they slide in after it.</span></header>
+    <div class="body">
+        <div class="f-grid">
+            <div class="field span2">
+                <label class="l" for="f-slide-image">picture <span class="opt">optional</span></label>
+                <input id="f-slide-image" class="plain" type="file" name="slide_image" accept="image/png,image/jpeg,image/webp,image/gif">
+                <div class="help">JPG, PNG, WEBP or GIF · max 5 MB. {% if custom_slide %}Your uploaded picture is in use.{% else %}The stock webinar picture is used as a placeholder until you upload one.{% endif %} Uploading replaces the previous one.</div>
+                {% if custom_slide %}<label class="chk"><input type="checkbox" name="remove_slide_image" id="f-remove-slide"> remove my picture and go back to the placeholder</label>{% endif %}
+                <div class="up-status" id="slide-status" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="field">
+                <label class="l">picture side</label>
+                <div class="seg" role="radiogroup">
+                    <label><input type="radio" name="slide_side" value="left" {% if s.side == 'left' %}checked{% endif %}> left</label>
+                    <label><input type="radio" name="slide_side" value="right" {% if s.side == 'right' %}checked{% endif %}> right</label>
+                </div>
+            </div>
+            <div class="field">
+                <label class="l">shape</label>
+                <div class="seg" role="radiogroup">
+                    {% for key, label in (('rounded', 'rounded'), ('square', 'square'), ('circle', 'circle')) %}<label><input type="radio" name="slide_shape" value="{{ key }}" {% if s.shape == key %}checked{% endif %}> {{ label }}</label>{% endfor %}
+                </div>
+            </div>
+            <div class="field">
+                <label class="l">frame shape (width : height)</label>
+                <div class="seg" role="radiogroup">
+                    {% for r in ratios %}<label><input type="radio" name="slide_ratio" value="{{ r }}" {% if s.ratio == r %}checked{% endif %}> {{ r|replace('/', ' : ') }}</label>{% endfor %}
+                </div>
+                <div class="help">Ignored for the circle (always square).</div>
+            </div>
+            <div class="field">
+                <label class="l">picture inside the frame</label>
+                <div class="seg" role="radiogroup">
+                    <label><input type="radio" name="slide_fit" value="cover" {% if s.fit == 'cover' %}checked{% endif %}> fill (crop edges)</label>
+                    <label><input type="radio" name="slide_fit" value="contain" {% if s.fit == 'contain' %}checked{% endif %}> show all (may leave margins)</label>
+                </div>
+            </div>
+            {{ num('slide_x', 'focus: left ↔ right', s.x, 'x', '0 = left edge, 50 = centre, 100 = right edge: which part stays visible when cropped') }}
+            {{ num('slide_y', 'focus: top ↕ bottom', s.y, 'y', '0 = top edge, 50 = centre, 100 = bottom edge') }}
+            {{ num('slide_zoom', 'zoom', s.zoom, 'zoom', 'percent · 100 = whole picture, 200 = twice as close, around the focus point') }}
+            <div class="field">
+                <label class="l">style</label>
+                <label class="chk"><input type="checkbox" name="slide_tilt" {% if s.tilt %}checked{% endif %}> slight tilt</label>
+            </div>
+        </div>
+
+        {{ img_style_panel('slide_img', s.img, 'slide', slide_image_url or '', '#f-slide-image') }}
+        <div class="pv-slide" style="margin-top:.9rem">
+            <div class="pv-frame {{ s.shape }}{{ ' tilt' if s.tilt }}" id="pv-slide" style="aspect-ratio: {{ '1 / 1' if s.shape == 'circle' else s.ratio|replace('/', ' / ') }}">
+                <img id="pv-slide-img" alt="" {% if slide_image_url %}src="{{ slide_image_url }}"{% endif %}>
+            </div>
+        </div>
+        <div class="pv-note">Preview of the picture on the slide.</div>
+
+        <h4 style="margin:1.3rem 0 .6rem;color:var(--a-amber)">words on the slide</h4>
+        <div class="f-grid">
+            <div class="field span2">
+                <label class="l" for="f-slide-badge">small line above the headline <span class="opt">optional</span></label>
+                <input id="f-slide-badge" type="text" name="slide_badge" value="{{ s.badge }}" maxlength="80">
+            </div>
+            <div class="field">
+                <label class="l" for="f-slide-headline">headline <span class="req">*</span></label>
+                <input id="f-slide-headline" type="text" name="slide_headline" value="{{ s.headline }}" maxlength="120">
+            </div>
+            <div class="field">
+                <label class="l" for="f-slide-highlight">highlighted word <span class="opt">optional</span></label>
+                <input id="f-slide-highlight" type="text" name="slide_highlight" value="{{ s.highlight }}" maxlength="60">
+                <div class="help">Must appear in the headline; shown in gold.</div>
+            </div>
+            <div class="field span2">
+                <label class="l" for="f-slide-text">paragraph <span class="opt">optional</span></label>
+                <textarea id="f-slide-text" name="slide_text" rows="4" maxlength="600">{{ s.text }}</textarea>
+            </div>
+            <div class="field">
+                <label class="l" for="f-slide-primary">main button <span class="opt">optional</span></label>
+                <input id="f-slide-primary" type="text" name="slide_primary_label" value="{{ s.primary_label }}" maxlength="40">
+                <div class="help">Opens the course page. Empty = no button.</div>
+            </div>
+            <div class="field">
+                <label class="l" for="f-slide-secondary">second button <span class="opt">optional</span></label>
+                <input id="f-slide-secondary" type="text" name="slide_secondary_label" value="{{ s.secondary_label }}" maxlength="40">
+                <div class="help">Opens the About page (the instructors). Empty = no button.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+
+<h2 class="a-section" id="contact">Contact, footer and payment <span>how people reach you and how they pay</span></h2>
+
+<div class="a-note">Everything on this page appears on the public site: the <b>footer of every page</b>, the <b>FAQ &amp; contact page</b>, and the <b>payment box above the Enroll button</b> on course pages. <b>Leave a field empty and it is simply not shown.</b></div>
+
+<section class="panel">
+    <header><b>ways to reach you</b><span>shown in the footer and on the FAQ page</span></header>
+    <div class="body f-grid">
+        <div class="field">
+            <label class="l" for="f-email">email <code>email</code></label>
+            <input id="f-email" type="text" name="email" value="{{ cform.email }}" inputmode="email" maxlength="{{ climits.email }}" placeholder="hello@yoursite.com">
+        </div>
+        <div class="field">
+            <label class="l" for="f-phone">phone <code>phone</code></label>
+            <input id="f-phone" type="text" name="phone" value="{{ cform.phone }}" inputmode="tel" maxlength="{{ climits.phone }}" placeholder="+880 1XXX-XXXXXX">
+            <div class="help">becomes a tap-to-call link on phones.</div>
+        </div>
+        <div class="field">
+            <label class="l" for="f-wa">WhatsApp number <code>whatsapp</code></label>
+            <input id="f-wa" type="text" name="whatsapp" value="{{ cform.whatsapp }}" inputmode="tel" maxlength="{{ climits.whatsapp }}" placeholder="01XXXXXXXXX">
+            <div class="help">opens a WhatsApp chat. 01XXXXXXXXX is read as a Bangladesh number (+880).</div>
+        </div>
+        <div class="field">
+            <label class="l" for="f-address">location <code>address</code></label>
+            <textarea id="f-address" name="address" rows="2" maxlength="{{ climits.address }}" placeholder="Jashore, Bangladesh">{{ cform.address }}</textarea>
+            <div class="help">up to 3 lines.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-reply">reply promise <code>reply_time</code></label>
+            <input id="f-reply" type="text" name="reply_time" value="{{ cform.reply_time }}" maxlength="{{ climits.reply_time }}" placeholder="Usually within a few hours.">
+            <div class="help">shown under the contact details and in the FAQ page heading. Only promise what you can keep.</div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>social accounts</b><span>paste the link (or an @handle where it is unambiguous)</span></header>
+    <div class="body f-grid">
+        {% for key, label, hosts, handle in socials %}
+        <div class="field">
+            <label class="l" for="f-{{ key }}">{{ label }} <code>{{ key }}</code></label>
+            <input id="f-{{ key }}" type="text" name="{{ key }}" value="{{ cform[key] }}" maxlength="200" placeholder="{{ 'https://' ~ hosts[0] ~ '/…' }}">
+        </div>
+        {% endfor %}
+        <div class="field span2"><div class="help">each link must point to its own platform, so a typo can never send visitors somewhere else.</div></div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>footer</b><span>the two lines of text in the footer</span></header>
+    <div class="body f-grid">
+        <div class="field span2">
+            <label class="l" for="f-ftext">footer text <code>footer_text</code></label>
+            <textarea id="f-ftext" name="footer_text" rows="2" maxlength="{{ climits.footer_text }}">{{ cform.footer_text }}</textarea>
+            <div class="help">under the logo. Empty = nothing is shown there.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-fnote">bottom line <code>footer_note</code></label>
+            <input id="f-fnote" type="text" name="footer_note" value="{{ cform.footer_note }}" maxlength="{{ climits.footer_note }}">
+            <div class="help">the small text at the right of the bottom bar (the © line on the left is automatic).</div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>payment</b><span>the "How to pay" box above the Enroll button on every course page</span></header>
+    <div class="body f-grid">
+        <div class="field">
+            <label class="l" for="f-pm">payment method <code>payment_method</code></label>
+            <input id="f-pm" type="text" name="payment_method" value="{{ cform.payment_method }}" maxlength="{{ climits.payment_method }}" placeholder="bKash">
+        </div>
+        <div class="field">
+            <label class="l" for="f-pn">number to pay to <code>payment_number</code></label>
+            <input id="f-pn" type="text" name="payment_number" value="{{ cform.payment_number }}" maxlength="{{ climits.payment_number }}" placeholder="01XXXXXXXXX">
+            <div class="help">shown big, with a Copy button.</div>
+        </div>
+        <div class="field span2">
+            <label class="l" for="f-pi">instructions <code>payment_instructions</code></label>
+            <textarea id="f-pi" name="payment_instructions" rows="5" maxlength="{{ climits.payment_instructions }}" placeholder="Send the course fee with “Send Money”, write your name as the reference, then paste the transaction ID in the enrollment form.">{{ cform.payment_instructions }}</textarea>
+            <div class="help">a blank line starts a new paragraph. A single course can have its own text in its editor. <b>The box is hidden while both the number and the instructions are empty.</b></div>
+        </div>
+    </div>
+</section>
+
+
+<div class="savebar" id="savebar">
+    <button class="a-btn primary" type="submit">save profile</button>
+    <a class="a-btn" href="{{ url_for('admin.profile') }}">discard changes</a>
+    <span class="dirty">● unsaved changes</span>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ asset('js/admin_imgstyle.js') }}"></script>
+<script>
+(function () {
+    var form = document.getElementById('editor'), savebar = document.getElementById('savebar'), dirty = false;
+    function $(id) { return document.getElementById(id); }
+    function checked(name) { var el = form.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : ''; }
+    function fmtSize(n) { return n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+    function markDirty() { dirty = true; savebar.classList.add('is-dirty'); }
+    form.addEventListener('input', markDirty);
+    form.addEventListener('change', markDirty);
+    form.addEventListener('submit', function () { dirty = false; });
+    window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+    /* slider <-> number box */
+    form.querySelectorAll('input[type=range][data-pair]').forEach(function (r) {
+        var box = $(r.getAttribute('data-pair'));
+        r.addEventListener('input', function () { box.value = r.value; refresh(); });
+        box.addEventListener('input', function () { if (box.value !== '') r.value = box.value; });
+    });
+
+    /* ----- live previews ----- */
+    var objectUrls = {};
+    function chosenUrl(part) {
+        if (objectUrls[part]) return objectUrls[part];
+        var sel = form.elements[part + '_logo'], opt = sel.options[sel.selectedIndex];
+        return opt ? opt.getAttribute('data-url') : '';
+    }
+    function logoPreview(part) {
+        var img = $('pv-' + part + '-img'), none = $('pv-' + part + '-none'), box = $('pv-' + part);
+        var url = chosenUrl(part), h = parseInt(form.elements[part + '_height'].value, 10) || 0;
+        if (url) { img.src = url; img.hidden = false; none.hidden = true; } else { img.hidden = true; none.hidden = false; }
+        img.style.height = Math.max(8, Math.min(h, 200)) + 'px';
+        var al = checked(part + '_align');
+        box.className = box.className.replace(/\b[lcr]\b/, '').trim() + ' ' + ({ left: 'l', center: 'c', right: 'r' }[al] || 'l');
+        if (part === 'footer') { box.classList.remove('plain', 'plate', 'white'); box.classList.add(checked('footer_style') || 'plain'); }
+    }
+    function slidePreview() {
+        var frame = $('pv-slide'), img = $('pv-slide-img');
+        var shape = checked('slide_shape') || 'rounded', ratio = (checked('slide_ratio') || '3/2').replace('/', ' / ');
+        var x = form.elements['slide_x'].value || 50, y = form.elements['slide_y'].value || 50, z = (parseInt(form.elements['slide_zoom'].value, 10) || 100) / 100;
+        frame.className = 'pv-frame ' + shape + (form.elements['slide_tilt'].checked ? ' tilt' : '');
+        frame.style.aspectRatio = shape === 'circle' ? '1 / 1' : ratio;
+        img.style.objectFit = checked('slide_fit') || 'cover';
+        img.style.objectPosition = x + '% ' + y + '%';
+        img.style.transformOrigin = x + '% ' + y + '%';
+        img.style.transform = 'scale(' + z + ')';
+        if (objectUrls.slide) img.src = objectUrls.slide;
+    }
+    function refresh() { logoPreview('header'); logoPreview('footer'); slidePreview(); }
+    form.addEventListener('input', refresh);
+    form.addEventListener('change', refresh);
+
+    /* chosen files: check type and size here, preview straight away (the server checks again) */
+    function watchFile(inputName, part, statusId, types, label) {
+        var input = form.elements[inputName], status = $(statusId);
+        input.addEventListener('change', function () {
+            var f = input.files[0];
+            if (objectUrls[part]) { URL.revokeObjectURL(objectUrls[part]); delete objectUrls[part]; }
+            status.className = 'up-status'; status.textContent = '';
+            if (!f) { refresh(); return; }
+            var okType = types.indexOf(f.type) !== -1 || (types.indexOf('image/svg+xml') !== -1 && /\.svg$/i.test(f.name));
+            if (!okType) { status.className = 'up-status bad'; status.textContent = '✗ Use a ' + label + ' file.'; input.value = ''; refresh(); return; }
+            var limit = /svg/.test(f.type) || /\.svg$/i.test(f.name) ? 1048576 : 5242880;
+            if (f.size > limit) { status.className = 'up-status bad'; status.textContent = '✗ That file is ' + fmtSize(f.size) + '. The limit is ' + fmtSize(limit) + '.'; input.value = ''; refresh(); return; }
+            objectUrls[part] = URL.createObjectURL(f);
+            status.className = 'up-status ok'; status.textContent = f.name + ' · ' + fmtSize(f.size) + ' — will be saved with the rest';
+            refresh();
+        });
+    }
+    var LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml'];
+    watchFile('header_file', 'header', 'header-status', LOGO_TYPES, 'PNG, JPG, WEBP, GIF or SVG');
+    watchFile('footer_file', 'footer', 'footer-status', LOGO_TYPES, 'PNG, JPG, WEBP, GIF or SVG');
+    watchFile('slide_image', 'slide', 'slide-status', ['image/png', 'image/jpeg', 'image/webp', 'image/gif'], 'JPG, PNG, WEBP or GIF');
+    var removeSlide = $('f-remove-slide');
+    if (removeSlide) removeSlide.addEventListener('change', function () { if (removeSlide.checked) { form.elements['slide_image'].value = ''; delete objectUrls.slide; } });
+
+    document.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (form.reportValidity()) { dirty = false; form.submit(); } }
+    });
+    refresh();
+})();
+</script>
+{% endblock %}

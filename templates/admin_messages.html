@@ -1,5 +1,5 @@
 {% extends "admin_base.html" %}
-{% block title %}messages{% endblock %}
+{% block title %}Messages{% endblock %}
 {% block content %}
 <div class="a-title">
     <h1>messages</h1>
@@ -15,7 +15,7 @@
 
 <div class="tiles">
     <div class="tile {{ 'warn' if stats.new else 'ok' }}"><div class="k">new</div><div class="v">{{ stats.new }}</div></div>
-    <div class="tile"><div class="k">done</div><div class="v">{{ stats.done }}</div></div>
+    <div class="tile"><div class="k">read</div><div class="v">{{ stats.done }}</div></div>
     <div class="tile"><div class="k">last 7 days</div><div class="v">{{ stats.week }}</div></div>
     <div class="tile"><div class="k">all time</div><div class="v">{{ stats.total }}</div></div>
 </div>
@@ -38,11 +38,11 @@
 
 <section class="panel">
     <header>
-        <b>inbox</b>
+        <b>Inbox</b>
         <div class="right">
             <form class="inline msg-filter" method="get" action="{{ url_for('admin.messages') }}">
                 <select name="show" onchange="this.form.submit()">
-                    {% for v, label in (('all', 'all'), ('new', 'new only'), ('done', 'done only')) %}
+                    {% for v, label in (('all', 'all'), ('new', 'new only'), ('done', 'read only')) %}
                     <option value="{{ v }}" {{ 'selected' if show == v }}>{{ label }}</option>
                     {% endfor %}
                 </select>
@@ -52,50 +52,65 @@
         </div>
     </header>
     {% if messages %}
+    <div class="inbox" id="inbox">
     {% for m in messages %}
-    <article class="msg {{ m.status }}">
-        <div class="msg-head">
-            <span class="chip {{ 'draft' if m.status == 'new' else 'published' }}">{{ m.status }}</span>
-            <b>{{ m.name }}</b>
-            <a href="mailto:{{ m.email }}">{{ m.email }}</a>
-            <span class="dim mono-sm">{{ m.received }}</span>
-            <span class="msg-actions">
-                <form class="inline" method="post" action="{{ url_for('admin.message_status', msg_id=m.id) }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <input type="hidden" name="status" value="{{ 'new' if m.status == 'done' else 'done' }}">
-                    <input type="hidden" name="back" value="{{ request.full_path.rstrip('?') }}">
-                    <button class="a-btn small {{ 'primary' if m.status == 'new' }}" type="submit">{{ 'mark as new' if m.status == 'done' else 'mark done' }}</button>
-                </form>
-                <form class="inline" method="post" action="{{ url_for('admin.message_delete', msg_id=m.id) }}" data-confirm="Move this message from {{ m.name }} to the trash?">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button class="a-btn small danger" type="submit">delete</button>
-                </form>
-            </span>
+    <button type="button" class="mrow {{ m.status }}" data-open="m-{{ m.id }}" title="Open this message">
+        <span class="mrow-dot" aria-hidden="true"></span>
+        <span class="mrow-from">{{ m.name }}</span>
+        <span class="mrow-text">{{ m.message|replace('\n', ' ') }}</span>
+        <span class="mrow-when">{{ when(m.received) }}</span>
+    </button>
+    {% endfor %}
+    </div>
+    {% for m in messages %}
+    <dialog class="mdlg" id="m-{{ m.id }}" aria-label="Message from {{ m.name }}">
+        <header class="mdlg-head">
+            <div>
+                <b class="mdlg-name">{{ m.name }}</b>
+                <span class="chip {{ 'draft' if m.status == 'new' else 'published' }}" data-state>{{ 'new' if m.status == 'new' else 'read' }}</span>
+                <div class="mdlg-line"><a href="mailto:{{ m.email }}">{{ m.email }}</a> · <span class="mono-sm">{{ m.received }}</span></div>
+            </div>
+            <button type="button" class="a-btn small" data-close aria-label="Close">close ✕</button>
+        </header>
+        <div class="mdlg-body">
+            <p class="msg-text">{{ m.message }}</p>
+            <div class="msg-meta">
+                {% if place(m) %}<span><i>from</i> {{ place(m) }}</span>{% endif %}
+                {% if m.isp %}<span><i>network</i> {{ m.isp }}</span>{% endif %}
+                <span><i>device</i> {{ m.device }} · {{ m.browser }} · {{ m.os }}</span>
+                <span><i>came from</i> {{ m.utm_source or m.first_referrer or 'direct or unknown' }}</span>
+            </div>
+            <details class="msg-tech">
+                <summary>technical details</summary>
+                <dl>
+                    <dt>IP address</dt><dd>{{ m.ip or '—' }}</dd>
+                    <dt>location</dt><dd>{{ [m.city, m.region, m.country]|select|join(', ') or '—' }}</dd>
+                    <dt>network</dt><dd>{{ m.isp or '—' }}</dd>
+                    <dt>time zone</dt><dd>{{ m.visitor_timezone or '—' }}</dd>
+                    <dt>language</dt><dd>{{ m.language or '—' }}</dd>
+                    <dt>first came from</dt><dd>{{ m.first_referrer or 'direct or unknown' }}</dd>
+                    <dt>campaign tags</dt><dd>{{ [m.utm_source, m.utm_medium, m.utm_campaign]|select|join(' / ') or '—' }}</dd>
+                    <dt>first page</dt><dd>{{ m.landing_page or '—' }}</dd>
+                    {% set seen = history.get(m.visitor_id, []) if m.visitor_id else [] %}
+                    <dt>pages viewed</dt><dd>{% if seen %}{{ seen|length }} in the last 30 days: {{ seen[-8:]|map(attribute='path')|join(' → ') }}{% else %}—{% endif %}</dd>
+                    <dt>message id</dt><dd>{{ m.id }}</dd>
+                </dl>
+            </details>
         </div>
-        <p class="msg-text">{{ m.message }}</p>
-        <div class="msg-meta">
-            {% if place(m) %}<span><i>from</i> {{ place(m) }}</span>{% endif %}
-            {% if m.isp %}<span><i>network</i> {{ m.isp }}</span>{% endif %}
-            <span><i>device</i> {{ m.device }} · {{ m.browser }} · {{ m.os }}</span>
-            <span><i>came from</i> {{ m.utm_source or m.first_referrer or 'direct or unknown' }}</span>
-        </div>
-        <details class="msg-tech">
-            <summary>technical details</summary>
-            <dl>
-                <dt>IP address</dt><dd>{{ m.ip or '—' }}</dd>
-                <dt>location</dt><dd>{{ [m.city, m.region, m.country]|select|join(', ') or '—' }}</dd>
-                <dt>network</dt><dd>{{ m.isp or '—' }}</dd>
-                <dt>time zone</dt><dd>{{ m.visitor_timezone or '—' }}</dd>
-                <dt>language</dt><dd>{{ m.language or '—' }}</dd>
-                <dt>first came from</dt><dd>{{ m.first_referrer or 'direct or unknown' }}</dd>
-                <dt>campaign tags</dt><dd>{{ [m.utm_source, m.utm_medium, m.utm_campaign]|select|join(' / ') or '—' }}</dd>
-                <dt>first page</dt><dd>{{ m.landing_page or '—' }}</dd>
-                {% set seen = history.get(m.visitor_id, []) if m.visitor_id else [] %}
-                <dt>pages viewed</dt><dd>{% if seen %}{{ seen|length }} in the last 30 days: {{ seen[-8:]|map(attribute='path')|join(' → ') }}{% else %}—{% endif %}</dd>
-                <dt>message id</dt><dd>{{ m.id }}</dd>
-            </dl>
-        </details>
-    </article>
+        <footer class="mdlg-foot">
+            <a class="a-btn small" href="mailto:{{ m.email }}?subject={{ ('Re: your message to ' ~ site_name)|urlencode }}">reply by email</a>
+            <form class="inline" method="post" action="{{ url_for('admin.message_status', msg_id=m.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="status" value="{{ 'new' if m.status == 'done' else 'done' }}" data-flip>
+                <input type="hidden" name="back" value="{{ request.full_path.rstrip('?') }}">
+                <button class="a-btn small" type="submit" data-flip-label>{{ 'mark as unread' if m.status == 'done' else 'mark as read' }}</button>
+            </form>
+            <form class="inline" method="post" action="{{ url_for('admin.message_delete', msg_id=m.id) }}" data-confirm="Move this message from {{ m.name }} to the trash?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="a-btn small danger" type="submit">delete</button>
+            </form>
+        </footer>
+    </dialog>
     {% endfor %}
     {% else %}
     <div class="empty">{% if stats.total %}no messages match this filter{% else %}no messages yet. They appear here when someone uses the form on the FAQ page.{% endif %}</div>
@@ -109,5 +124,39 @@ document.addEventListener('submit', function (e) {
     var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
     if (msg && !window.confirm(msg)) e.preventDefault();
 });
+(function () {
+    // a row opens its message in a popup; Esc, the close button or a click outside closes it
+    var csrf = {{ csrf_token|tojson }};
+    function open(id) {
+        var d = document.getElementById(id); if (!d || !d.showModal || d.open) return;
+        d.showModal(); d.querySelector('.mdlg-body').scrollTop = 0;
+        var row = document.querySelector('[data-open="' + id + '"]');
+        if (row && row.classList.contains('new')) markRead(id.slice(2), row, d);   // opening a message means it has been read
+    }
+    function bump(sel, by) { var el = document.querySelector(sel); if (el) el.textContent = String(Math.max(0, (parseInt(el.textContent, 10) || 0) + by)); }
+    function markRead(msgId, row, d) {
+        var fd = new FormData(); fd.append('csrf_token', csrf); fd.append('status', 'done');
+        fetch({{ url_for('admin.message_status', msg_id='__ID__')|tojson }}.replace('__ID__', msgId), { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                if (!j || !j.ok) return;
+                row.classList.remove('new'); row.classList.add('done');
+                d.querySelector('[data-state]').textContent = 'read'; d.querySelector('[data-state]').className = 'chip published';
+                d.querySelector('[data-flip]').value = 'new'; d.querySelector('[data-flip-label]').textContent = 'mark as unread';
+                var tiles = document.querySelectorAll('.tiles .tile .v');
+                if (tiles.length > 1) { tiles[0].textContent = j.new; bump('.tiles .tile:nth-child(2) .v', 1); }
+                var tile = document.querySelector('.tiles .tile'); if (tile) tile.className = 'tile ' + (j.new ? 'warn' : 'ok');
+                var badge = document.querySelector('.a-nav .badge');
+                if (badge) { if (j.new) badge.textContent = '(' + j.new + ')'; else badge.remove(); }
+            }).catch(function () {});
+    }
+    document.addEventListener('click', function (e) {
+        var row = e.target.closest && e.target.closest('[data-open]');
+        if (row) { open(row.getAttribute('data-open')); return; }
+        if (e.target.closest && e.target.closest('[data-close]')) { var dlg = e.target.closest('dialog'); if (dlg) dlg.close(); return; }
+        if (e.target.classList && e.target.classList.contains('mdlg')) e.target.close();   // the dark area around the box
+    });
+    if (location.hash.indexOf('#m-') === 0) open(location.hash.slice(1));
+})();
 </script>
 {% endblock %}

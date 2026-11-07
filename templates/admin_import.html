@@ -34,7 +34,7 @@
                 <label><input type="radio" name="mode" value="replace"><span><b>make this server match the zip</b></span><small>The current content of each ticked part is moved to the trash first (restorable), then the zip's content is put in. Use it for a fresh copy.</small></label>
             </div>
             <button class="a-btn primary" type="submit">import now</button>
-            <a class="a-btn" href="{{ url_for('admin.transfer') }}">cancel</a>
+            <a class="a-btn" href="{{ url_for('admin.files', _anchor='transfer') }}">cancel</a>
         </div>
     </section>
 </form>

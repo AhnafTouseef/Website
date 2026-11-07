@@ -438,15 +438,8 @@ def _discount_info(meta):
 
 # Soft background colours for the cards on the Courses page. Assigned from the folder name, so a
 # course keeps its colour between page loads, and a card never matches the ones right next to it.
-CARD_TINTS = [
-    "#82d8be", "#ddeaa8", "#eaa8a8", "#dda8ea", "#a8c3ea",
-    "#d9dbff", "#e4f6f8", "#ead0a8", "#d89c82", "#add882",
-    "#e0fffd", "#ad82d8", "#d8829c", "#82bed8", "#b6eaa8",
-    "#d882d0", "#e8f8ee", "#d8d082", "#a8eac3", "#ffdede",
-    "#82d88a", "#eaa8d0", "#ffe8ee", "#efedf5", "#eaf0ff",
-    "#eef8dc", "#828ad8", "#e8f1ff", "#f3e8ff", "#a8eaea"
-]
-
+CARD_TINTS = ["#e8f1ff", "#e8f8ee", "#fff1de", "#f3e8ff", "#ffe8ee",
+              "#e4f6f8", "#fffbd9", "#eaf0ff", "#eef8dc", "#ffe9e0"]
 
 
 def assign_tints(course_list):
@@ -3441,15 +3434,32 @@ def messages():
     for v in recent_visits(30):
         if v.get("visitor_id") in wanted:
             history.setdefault(v["visitor_id"], []).append(v)
+    today = now_bd().strftime("%Y-%m-%d")
+
+    def when(received):
+        """What a mail app shows in the list: the time for today's messages, otherwise the date."""
+        received = received or ""
+        if received[:10] == today:
+            return received[11:16]
+        try:
+            d = datetime.strptime(received[:10], "%Y-%m-%d")
+            return f"{d.day} {d.strftime('%b')}" + ("" if d.year == now_bd().year else f" {d.year}")
+        except ValueError:
+            return received[:10]
+
     return render_template("admin_messages.html", messages=shown, stats=stats, show=show, q=q, history=history,
-                           place=_place, audience=_audience(rows),
+                           place=_place, when=when, audience=_audience(rows),
                            exists=os.path.isfile(_msg_path()), unreadable=messages_file_unreadable())
 
 
 @admin_bp.post("/messages/<msg_id>/status")
 def message_status(msg_id):
     status = "done" if request.form.get("status") == "done" else "new"
-    if not update_message(msg_id, status=status):
+    found = update_message(msg_id, status=status)
+    if request.headers.get("X-Requested-With") == "fetch":
+        # the inbox marks a message as read in the background when it is opened
+        return jsonify(ok=bool(found), new=message_counts()["new"]), (200 if found else 404)
+    if not found:
         flash("That message no longer exists.", "error")
     return redirect(request.form.get("back") if (request.form.get("back") or "").startswith(ADMIN_PREFIX + "/messages") else url_for("admin.messages"))
 
@@ -4775,58 +4785,86 @@ def _read_branding_submission():
     return settings, uploads, errors
 
 
-# ---------- routes: contact details, footer text, payment instructions ----------
+# ---------- routes: Profile (branding + contact details, footer text, payment instructions) ----------
+# One page, one Save button. The two halves keep their own readers and validators; nothing is saved unless both are valid.
 
+def _save_contact(settings):
+    os.makedirs(_site_dir(), exist_ok=True)
+    _atomic_write(os.path.join(_site_dir(), CONTACT_FILE), json.dumps(clean_contact(settings), indent=4, ensure_ascii=False) + "\n")
+    log.info("admin: saved contact details")
+
+
+def _save_branding(settings, uploads):
+    os.makedirs(_logo_dir(), exist_ok=True)
+    os.makedirs(_images_dir(), exist_ok=True)
+    for part in ("header", "footer"):
+        if part in uploads:
+            ext, data = uploads[part]
+            _atomic_write(os.path.join(_logo_dir(), part + ext), data)
+            _remove_thumbnails(_logo_dir(), keep=part + ext, stem=part)
+            settings[part]["logo"] = part + ext
+    if "slide" in uploads:
+        ext, data = uploads["slide"]
+        _atomic_write(os.path.join(_images_dir(), "brand-slide" + ext), data)
+        _remove_thumbnails(_images_dir(), keep="brand-slide" + ext, stem="brand-slide")
+    elif request.form.get("remove_slide_image") == "on":
+        _remove_thumbnails(_images_dir(), stem="brand-slide")
+    cleaned = clean_branding(settings)
+    _atomic_write(os.path.join(_logo_dir(), BRAND_FILE), json.dumps(cleaned, indent=4, ensure_ascii=False) + "\n")
+    log.info("admin: saved branding")
+
+
+def _profile_view(do_branding=True, do_contact=True):
+    """The Profile page. `do_branding` / `do_contact` say which halves a POST carries (the old /branding and /contact URLs carry one)."""
+    errors, status = [], 200
+    bform, cform = read_branding(), read_contact()
+    if request.method == "POST":
+        bsettings = uploads = csettings = None
+        if do_branding:
+            bsettings, uploads, berr = _read_branding_submission()
+            errors += berr
+        if do_contact:
+            csettings, cerr = _read_contact_submission()
+            errors += cerr
+        if not errors:
+            if do_branding:
+                _save_branding(bsettings, uploads)
+            if do_contact:
+                _save_contact(csettings)
+            flash("Saved. The public site shows the new profile now.", "success")
+            return redirect(url_for("admin.profile"))
+        status = 400
+        if do_branding:
+            bform = clean_branding(bsettings)
+        if do_contact:
+            cform = csettings
+    live = load_branding()
+    return render_template(
+        "admin_profile.html", bform=bform, cform=cform, errors=errors, files=_logo_files(), live=live,
+        ratios=list(SLIDE_RATIOS), limits=BRAND_LIMITS, climits=CONTACT_LIMITS, socials=SOCIALS,
+        custom_slide=live["slide"]["custom_image"], slide_image_url=live["slide"]["image_url"],
+    ), status
+
+
+@admin_bp.route("/profile", methods=["GET", "POST"])
+def profile():
+    return _profile_view()
+
+
+# The two old pages now live inside Profile. Their URLs keep working: a visit goes to the right part of Profile, and a form
+# that still posts to them saves just its own half.
 @admin_bp.route("/contact", methods=["GET", "POST"])
 def contact():
-    errors, status = [], 200
-    form = read_contact()
-    if request.method == "POST":
-        settings, errors = _read_contact_submission()
-        if not errors:
-            os.makedirs(_site_dir(), exist_ok=True)
-            _atomic_write(os.path.join(_site_dir(), CONTACT_FILE), json.dumps(clean_contact(settings), indent=4, ensure_ascii=False) + "\n")
-            log.info("admin: saved contact details")
-            flash("Saved. The footer, the FAQ page and the payment box show the new details now.", "success")
-            return redirect(url_for("admin.contact"))
-        form, status = settings, 400
-    return render_template("admin_contact.html", form=form, errors=errors, socials=SOCIALS, limits=CONTACT_LIMITS, live=load_contact()), status
+    if request.method == "GET":
+        return redirect(url_for("admin.profile", _anchor="contact"))
+    return _profile_view(do_branding=False)
 
 
 @admin_bp.route("/branding", methods=["GET", "POST"])
 def branding():
-    errors, status = [], 200
-    current = read_branding()
-    if request.method == "POST":
-        settings, uploads, errors = _read_branding_submission()
-        if not errors:
-            os.makedirs(_logo_dir(), exist_ok=True)
-            os.makedirs(_images_dir(), exist_ok=True)
-            for part in ("header", "footer"):
-                if part in uploads:
-                    ext, data = uploads[part]
-                    _atomic_write(os.path.join(_logo_dir(), part + ext), data)
-                    _remove_thumbnails(_logo_dir(), keep=part + ext, stem=part)
-                    settings[part]["logo"] = part + ext
-            if "slide" in uploads:
-                ext, data = uploads["slide"]
-                _atomic_write(os.path.join(_images_dir(), "brand-slide" + ext), data)
-                _remove_thumbnails(_images_dir(), keep="brand-slide" + ext, stem="brand-slide")
-            elif request.form.get("remove_slide_image") == "on":
-                _remove_thumbnails(_images_dir(), stem="brand-slide")
-            cleaned = clean_branding(settings)
-            _atomic_write(os.path.join(_logo_dir(), BRAND_FILE), json.dumps(cleaned, indent=4, ensure_ascii=False) + "\n")
-            log.info("admin: saved branding")
-            flash("Saved. The public site already shows the new logos and slide.", "success")
-            return redirect(url_for("admin.branding"))
-        status = 400
-        current = clean_branding(settings)
-    live = load_branding()
-    return render_template(
-        "admin_branding.html", form=current, errors=errors, files=_logo_files(), live=live,
-        ratios=list(SLIDE_RATIOS), limits=BRAND_LIMITS,
-        custom_slide=live["slide"]["custom_image"], slide_image_url=live["slide"]["image_url"],
-    ), status
+    if request.method == "GET":
+        return redirect(url_for("admin.profile", _anchor="branding"))
+    return _profile_view(do_contact=False)
 
 
 # ===========================================================================
@@ -5319,8 +5357,10 @@ def _fb_dest_conflicts(base_parts, members):
 
 @admin_bp.get("/files")
 def files():
+    _import_clean_old()
     return render_template("admin_files.html", start=request.args.get("path", ""), batch_limit=BIG_UPLOAD_LIMIT,
-                           edit_limit=FB_EDIT_LIMIT, allowed=sorted(FB_ALLOWED_EXTS))
+                           edit_limit=FB_EDIT_LIMIT, allowed=sorted(FB_ALLOWED_EXTS),
+                           parts=TRANSFER_PARTS, stats=_transfer_stats(), limit=BIG_UPLOAD_LIMIT)
 
 
 @admin_bp.get("/files/api/list")
@@ -5919,8 +5959,8 @@ def _import_analyse(zpath):
 
 @admin_bp.get("/transfer")
 def transfer():
-    _import_clean_old()
-    return render_template("admin_transfer.html", parts=TRANSFER_PARTS, stats=_transfer_stats(), limit=BIG_UPLOAD_LIMIT)
+    # Transfer now lives at the bottom of the Files page; the old URL still works.
+    return redirect(url_for("admin.files", _anchor="transfer"))
 
 
 @admin_bp.post("/transfer/export")
@@ -5928,7 +5968,7 @@ def transfer_export():
     chosen = [p for p in request.form.getlist("parts") if p in TRANSFER_IDS]
     if not chosen:
         flash("Tick at least one part to export.", "error")
-        return redirect(url_for("admin.transfer"))
+        return redirect(url_for("admin.files", _anchor="transfer"))
     items, counts = [], {pid: 0 for pid in chosen}
     for full, segs, size in _transfer_walk():
         pid = _transfer_part_of(segs)
@@ -5974,7 +6014,7 @@ def transfer_import_review(token):
     info, err = _import_analyse(path)
     if err:
         flash(err, "error")
-        return redirect(url_for("admin.transfer"))
+        return redirect(url_for("admin.files", _anchor="transfer"))
     return render_template("admin_import.html", token=token, info=info, parts=TRANSFER_PARTS)
 
 
@@ -5991,7 +6031,7 @@ def transfer_import_apply(token):
         members, skipped, err = _zip_scan(zf)
         if err:
             flash(err, "error")
-            return redirect(url_for("admin.transfer"))
+            return redirect(url_for("admin.files", _anchor="transfer"))
         wanted = []
         for info, segs in members:
             if segs[0] in TRANSFER_ROOTS and len(segs) > 1 and _transfer_part_of(segs[1:]) in chosen:
@@ -6025,7 +6065,7 @@ def transfer_import_apply(token):
     if res["skipped"]:
         msg += f", {len(res['skipped'])} skipped (see the log on the system page)"
     flash(msg + ".", "success" if res["written"] or not res["skipped"] else "error")
-    return redirect(url_for("admin.transfer"))
+    return redirect(url_for("admin.files", _anchor="transfer"))
 
 
 

@@ -12,18 +12,15 @@
     <header class="a-top">
         <a class="a-brand" href="{{ url_for('admin.dashboard') }}">{{ site_name|lower }}<span>@console</span></a>
         <nav class="a-nav">
-            <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint in ('admin.dashboard', 'admin.course_edit') }}">courses</a>
-            <a href="{{ url_for('admin.course_new') }}" class="{{ 'on' if request.endpoint == 'admin.course_new' }}">+ new</a>
-            <a href="{{ url_for('admin.instructors_list') }}" class="{{ 'on' if request.endpoint in ('admin.instructors_list', 'admin.instructor_new', 'admin.instructor_edit') }}">instructors</a>
-            <a href="{{ url_for('admin.webinars_list') }}" class="{{ 'on' if request.endpoint in ('admin.webinars_list', 'admin.webinar_new', 'admin.webinar_edit') }}">webinars</a>
-            <a href="{{ url_for('admin.visitors') }}" class="{{ 'on' if request.endpoint == 'admin.visitors' }}">visitors</a>
-            <a href="{{ url_for('admin.messages') }}" class="{{ 'on' if request.endpoint == 'admin.messages' }}">messages{% if msg_new %} <span class="badge">({{ msg_new }})</span>{% endif %}</a>
-            <a href="{{ url_for('admin.files') }}" class="{{ 'on' if request.endpoint == 'admin.files' }}">files</a>
-            <a href="{{ url_for('admin.transfer') }}" class="{{ 'on' if request.endpoint == 'admin.transfer' or (request.endpoint or '').startswith('admin.transfer_import') }}">transfer</a>
-            <a href="{{ url_for('admin.contact') }}" class="{{ 'on' if request.endpoint == 'admin.contact' }}">contact</a>
-            <a href="{{ url_for('admin.branding') }}" class="{{ 'on' if request.endpoint == 'admin.branding' }}">branding</a>
-            <a href="{{ url_for('admin.trash') }}" class="{{ 'on' if request.endpoint == 'admin.trash' }}">trash{% if trash_count %} <span class="badge">({{ trash_count }})</span>{% endif %}</a>
-            <a href="{{ url_for('admin.system') }}" class="{{ 'on' if request.endpoint == 'admin.system' }}">system</a>
+            <a href="{{ url_for('admin.dashboard') }}" class="{{ 'on' if request.endpoint in ('admin.dashboard', 'admin.course_edit', 'admin.course_new', 'admin.course_enrollments') }}">Courses</a>
+            <a href="{{ url_for('admin.webinars_list') }}" class="{{ 'on' if request.endpoint in ('admin.webinars_list', 'admin.webinar_new', 'admin.webinar_edit') }}">Webinars</a>
+            <a href="{{ url_for('admin.instructors_list') }}" class="{{ 'on' if request.endpoint in ('admin.instructors_list', 'admin.instructor_new', 'admin.instructor_edit') }}">Instructors</a>
+            <a href="{{ url_for('admin.files') }}" class="{{ 'on' if request.endpoint in ('admin.files', 'admin.transfer') or (request.endpoint or '').startswith('admin.transfer_import') }}">Files</a>
+            <a href="{{ url_for('admin.profile') }}" class="{{ 'on' if request.endpoint in ('admin.profile', 'admin.contact', 'admin.branding') }}">Profile</a>
+            <a href="{{ url_for('admin.visitors') }}" class="{{ 'on' if request.endpoint == 'admin.visitors' }}">Visitors</a>
+            <a href="{{ url_for('admin.messages') }}" class="{{ 'on' if request.endpoint == 'admin.messages' }}">Messages{% if msg_new %} <span class="badge">({{ msg_new }})</span>{% endif %}</a>
+            <a href="{{ url_for('admin.trash') }}" class="{{ 'on' if request.endpoint == 'admin.trash' }}">Trash{% if trash_count %} <span class="badge">({{ trash_count }})</span>{% endif %}</a>
+            <a href="{{ url_for('admin.system') }}" class="{{ 'on' if request.endpoint == 'admin.system' }}">System</a>
         </nav>
         <span class="a-spacer"></span>
         <span class="a-meta">

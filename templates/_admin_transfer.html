@@ -1,0 +1,68 @@
+<h2 class="a-section" id="transfer">Transfer <span>move the site's content to another server without pushing it through git</span></h2>
+
+<section class="panel">
+    <header><b>how it works</b></header>
+    <div class="body">
+        <ol class="tr-steps">
+            <li><b>Code</b> (app.py, templates, css, js) goes to the new server through git. The repository holds no course, instructor, webinar or image data: <code>.gitignore</code> leaves it out.</li>
+            <li><b>Content</b> travels in one zip made here. Export on the old server, import on the new one.</li>
+            <li>The admin password and the secret key are <b>never</b> included. The new server makes its own.</li>
+        </ol>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>export</b><span class="dim">one zip with the parts you tick</span></header>
+    <div class="body">
+        <form method="post" action="{{ url_for('admin.transfer_export') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="tr-parts">
+                {% for pid, label, folder in parts %}
+                <label>
+                    <input type="checkbox" name="parts" value="{{ pid }}" {{ 'checked' if stats[pid].files }} {{ 'disabled' if not stats[pid].files }}>
+                    <span>{{ label }}</span>
+                    <span class="meta">{{ stats[pid].files }} file(s) · {{ stats[pid].size|filesize }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <button class="a-btn primary" type="submit">download the content zip</button>
+        </form>
+    </div>
+</section>
+
+<section class="panel">
+    <header><b>import</b><span class="dim">a zip made by "export" on another server</span></header>
+    <div class="body">
+        <div class="tr-drop" id="tr-drop" tabindex="0" role="button">drop the zip here, or click to choose it</div>
+        <input type="file" id="tr-file" accept=".zip,application/zip" hidden>
+        <div class="tr-msg" id="tr-msg"></div>
+        <p class="dim">Nothing is changed by choosing a file. You first see what it contains and decide how to apply it. Largest accepted: {{ (limit / 1048576)|int }} MB (environment variable MAX_UPLOAD_MB).</p>
+    </div>
+</section>
+
+<script>
+(function () {
+    var drop = document.getElementById('tr-drop'), file = document.getElementById('tr-file'), msg = document.getElementById('tr-msg');
+    var csrf = {{ csrf_token|tojson }}, url = {{ url_for('admin.transfer_import_upload')|tojson }};
+    function say(t, bad) { msg.textContent = t; msg.className = 'tr-msg' + (bad ? ' err' : ''); }
+    function send(f) {
+        if (!f) return;
+        var fd = new FormData(); fd.append('bundle', f, f.name);
+        var xhr = new XMLHttpRequest(); xhr.open('POST', url); xhr.setRequestHeader('X-CSRF-Token', csrf);
+        xhr.upload.onprogress = function (e) { if (e.lengthComputable) say('uploading ' + Math.round(e.loaded / e.total * 100) + '%…'); };
+        xhr.onload = function () {
+            var d = null; try { d = JSON.parse(xhr.responseText); } catch (e) {}
+            if (d && d.ok) { say('checking…'); window.location = d.url; return; }
+            say(d && d.error ? d.error : (xhr.status === 413 ? 'That file is bigger than the upload limit.' : 'Upload failed (status ' + xhr.status + ').'), true);
+        };
+        xhr.onerror = function () { say('The connection failed.', true); };
+        say('uploading…'); xhr.send(fd);
+    }
+    drop.addEventListener('click', function () { file.click(); });
+    drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } });
+    file.addEventListener('change', function () { send(file.files[0]); file.value = ''; });
+    ['dragenter', 'dragover'].forEach(function (n) { drop.addEventListener(n, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (n) { drop.addEventListener(n, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function (e) { send(e.dataTransfer.files[0]); });
+})();
+</script>

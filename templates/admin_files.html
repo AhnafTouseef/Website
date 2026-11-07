@@ -1,11 +1,11 @@
 {% extends "admin_base.html" %}
-{% block title %}files{% endblock %}
+{% block title %}Files{% endblock %}
 {% block content %}
 <div class="a-title">
     <h1>files</h1>
     <span class="sub">everything under content/ (courses, instructors, webinars, pictures, logos) · deleted items go to the trash, not away for good</span>
     <div class="right">
-        <a class="a-btn small" href="{{ url_for('admin.transfer') }}">export / import all content →</a>
+        <a class="a-btn small" href="#transfer">export / import all content ↓</a>
     </div>
 </div>
 
@@ -102,6 +102,8 @@
     <textarea id="fb-edit-text" spellcheck="false" wrap="off"></textarea>
     <div class="fb-edit-msg" id="fb-edit-msg"></div>
 </dialog>
+
+{% include "_admin_transfer.html" %}
 
 <div class="fb-menu" id="fb-menu" hidden></div>
 <div class="fb-toasts" id="fb-toasts" aria-live="polite"></div>

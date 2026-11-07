@@ -3,6 +3,8 @@
     --a-bg: #0b0f14;
     --a-panel: #111820;
     --a-panel-2: #151e28;
+    --a-panel-b: #182636;      /* every second panel on a page, so long pages are easy to follow */
+    --a-panel-b2: #1d2f43;
     --a-line: #223040;
     --a-text: #c9d6e2;
     --a-dim: #6f8296;
@@ -56,7 +58,7 @@ body.admin {
 
 .a-wrap { width: min(1400px, calc(100% - 2rem)); margin: 0 auto; padding: 1.4rem 0 3rem; }
 .a-title { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
-.a-title h1 { font-size: 1.25rem; color: #fff; }
+.a-title h1 { font-size: 1.25rem; color: #fff; text-transform: capitalize; }
 .a-title h1::before { content: "$ "; color: var(--a-green); }
 .a-title .sub { color: var(--a-dim); }
 .a-title .right { margin-left: auto; display: flex; gap: 0.5rem; flex-wrap: wrap; }
@@ -536,3 +538,49 @@ a.tile.link:hover { border-color: var(--a-dim); }
 .daybar .bar { flex: 1; width: 100%; display: flex; align-items: flex-end; background: var(--a-line); min-height: 0; }
 .daybar .bar i { display: block; width: 100%; background: var(--a-blue); min-height: 0; }
 .daybar .n { color: var(--a-text); }
+
+
+/* ---------- alternating panels: odd ones darker, even ones lighter, from top to bottom ---------- */
+.panel:nth-of-type(even):not(.danger) { background: var(--a-panel-b); border-color: #2b3f55; }
+.panel:nth-of-type(even):not(.danger) > header { background: var(--a-panel-b2); border-color: #2b3f55; }
+.panel:nth-of-type(odd):not(.danger) { border-color: #1e2c3b; }
+
+/* ---------- section headings inside a long page (Profile, Files + Transfer) ---------- */
+.a-section { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; margin: 1.8rem 0 0.9rem; padding-top: 0.9rem; border-top: 1px dashed var(--a-line); font-size: 1.1rem; color: #fff; scroll-margin-top: 4.5rem; }
+.a-section:first-child { margin-top: 0.4rem; border-top: 0; padding-top: 0; }
+.a-section::before { content: "##"; color: var(--a-green); }
+.a-section span { font-size: 0.82rem; font-weight: 400; color: var(--a-dim); }
+
+/* ---------- inbox: one line per message, the full text opens in a popup ---------- */
+.inbox { display: block; }
+.mrow {
+    display: grid; grid-template-columns: 0.7rem minmax(7rem, 14rem) minmax(0, 1fr) auto; gap: 0.9rem; align-items: center;
+    width: 100%; margin: 0; padding: 0.62rem 0.9rem; text-align: left;
+    background: transparent; color: var(--a-dim); font: inherit; border: 0; border-top: 1px solid var(--a-line); cursor: pointer;
+}
+.mrow:first-child { border-top: 0; }
+.mrow:hover, .mrow:focus-visible { background: rgba(90, 176, 255, 0.08); outline: none; }
+.mrow-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: transparent; }
+.mrow.new .mrow-dot { background: var(--a-amber); }
+.mrow-from { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--a-text); }
+.mrow-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mrow-when { color: var(--a-dim); font-size: 0.8rem; white-space: nowrap; }
+.mrow.new .mrow-from, .mrow.new .mrow-text { color: #fff; font-weight: 600; }
+.mrow.new .mrow-text { color: #dbe7f3; }
+.mrow.done { opacity: 0.8; }
+
+.mdlg { width: min(46rem, calc(100vw - 1.5rem)); max-height: calc(100vh - 2rem); padding: 0; border: 1px solid #2b3f55; background: var(--a-panel); color: var(--a-text); font: inherit; }
+.mdlg[open] { display: flex; flex-direction: column; }
+.mdlg::backdrop { background: rgba(3, 6, 10, 0.72); }
+.mdlg-head { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; padding: 0.8rem 1rem; background: var(--a-panel-2); border-bottom: 1px solid var(--a-line); }
+.mdlg-name { font-size: 1.05rem; color: #fff; margin-right: 0.4rem; }
+.mdlg-line { margin-top: 0.15rem; color: var(--a-dim); font-size: 0.84rem; overflow-wrap: anywhere; }
+.mdlg-body { padding: 1rem; overflow-y: auto; min-height: 6rem; }
+.mdlg-body .msg-text { margin-top: 0; font-size: 0.98rem; }
+.mdlg-foot { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0.7rem 1rem; background: var(--a-panel-2); border-top: 1px solid var(--a-line); }
+.mdlg-foot .a-btn:last-child { margin-left: auto; }
+@media (max-width: 640px) {
+    .mrow { grid-template-columns: 0.6rem minmax(0, 1fr) auto; gap: 0.2rem 0.6rem; }
+    .mrow-text { grid-column: 2 / -1; grid-row: 2; }
+    .msg-tech dl { grid-template-columns: 1fr; }
+}
