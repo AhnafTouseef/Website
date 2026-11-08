@@ -435,6 +435,7 @@
         if (!e) return;
         if (e.dir) { go(e.path); return; }
         if (['image', 'pdf', 'video', 'audio'].indexOf(e.kind) >= 0) { preview(e); return; }
+        if (e.grid && window.FBGrid) { FBGrid.open(e, hooks); return; }
         if (e.text) { editor(e); return; }
         if (e.kind === 'archive') { extractFlow(e); return; }
         download([e]);
@@ -482,6 +483,7 @@
             editing = { path: e.path, mtime: d.mtime, clean: d.text };
             $('#fb-edit-name').textContent = 'content/' + e.path;
             etext.value = d.text;
+            editing.clean = etext.value;          // a text box turns CRLF into LF, so compare with what it really holds
             estate.textContent = '';
             emsg.textContent = '';
             edlg.showModal();
@@ -525,6 +527,7 @@
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveEdit(); }
     });
     edlg.addEventListener('close', function () { editing = null; load(true); });
+    var hooks = { api: api, modal: modal, toast: toast, reload: load, textEditor: editor };   // used by admin_csv.js (the table editor)
 
     /* ---------- actions ---------- */
 
@@ -735,7 +738,8 @@
         var core = sel.some(function (x) { return x.dir && isCore(x.path); });
         var items = [];
         if (sel.length) {
-            if (one) items.push({ label: one.dir ? 'open' : (one.text ? 'edit' : 'open / preview'), run: function () { openEntry(one); } });
+            if (one) items.push({ label: one.dir ? 'open' : (one.grid || one.text ? 'edit' : 'open / preview'), run: function () { openEntry(one); } });
+            if (one && one.grid && one.text) items.push({ label: 'edit as text', run: function () { editor(one); } });
             if (one && one.edit) items.push({ label: 'edit this ' + one.role + ' in the admin ↗', run: function () { window.open(one.edit, '_blank'); } });
             if (one && state.search) items.push({ label: 'show in its folder', run: function () { go(one.dir ? parentOf(one.path) : (one.where || '')); } });
             if (one && one.kind === 'archive') items.push({ label: 'unzip…', run: function () { extractFlow(one); } });

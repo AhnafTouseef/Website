@@ -213,7 +213,7 @@ pipeline_courses = [
 ]
 
 # The general FAQ is content/faq/faq.csv (question,answer): edit it in the admin file browser or in Excel.
-# Messages sent through the form on the FAQ page are stored in content/faq/messages.csv.
+# Messages sent through the form on the FAQ page are stored in content/faq/messages.json.
 
 
 # ---------------------------------------------------------------------------
@@ -1660,7 +1660,7 @@ def about():
 #   content/faq/faq.csv                     the general FAQ shown on the page: columns question,answer
 #                                           (edit it in the admin file browser or in Excel; "{site_name}"
 #                                           in an answer becomes the site name)
-#   content/faq/messages.csv                what visitors send through the form on the FAQ page
+#   content/faq/messages.json               what visitors send through the form on the FAQ page (a list of messages)
 #   content/analytics/visits-YYYY-MM.csv    one row per page view of a real visitor, one file per month
 #   content/course/<course>/enrollments.csv one row each time somebody presses an Enroll button of that course
 #
@@ -1682,7 +1682,8 @@ def about():
 # ---------------------------------------------------------------------------
 
 FAQ_FILE = "faq.csv"
-MSG_FILE = "messages.csv"
+MSG_FILE = "messages.json"
+MSG_OLD_CSV = "messages.csv"      # the format before 2026-11; imported once into messages.json
 ENROLL_FILE = "enrollments.csv"
 MSG_COLUMNS = ["id", "received", "status", "name", "email", "message", "visitor_id", "ip", "country", "region",
                "city", "isp", "visitor_timezone", "device", "browser", "os", "language", "first_referrer",
@@ -1876,40 +1877,81 @@ def _msg_path():
     return os.path.join(_faq_dir(), MSG_FILE)
 
 
-def _read_messages_unlocked():
+def _old_msg_csv_path():
+    return os.path.join(_faq_dir(), MSG_OLD_CSV)
+
+
+def _normalise_message(raw, position):
+    """One stored message as a dict with every column; keys somebody added by hand are kept in `_extra`."""
+    row, extra = {}, {}
+    for key, value in raw.items():
+        key = str(key).strip()
+        if key in MSG_COLUMNS:
+            row[key] = "" if value is None else (value if isinstance(value, str) else str(value))
+        elif key and not key.startswith("_"):
+            extra[key] = value
+    for col in MSG_COLUMNS:
+        row.setdefault(col, "")
+    row["status"] = "done" if row["status"].strip().lower() == "done" else "new"
+    if not row["id"].strip():
+        row["id"] = "r%08x" % zlib.crc32(json.dumps([position, raw], sort_keys=True, default=str).encode("utf-8"))
+    row["_extra"] = extra
+    return row
+
+
+def _import_old_messages_csv():
+    """messages.csv (the format before 2026-11) -> a list of messages. The old file is renamed, never deleted."""
+    path = _old_msg_csv_path()
     try:
-        with open(_msg_path(), "rb") as fh:
+        with open(path, "rb") as fh:
             rows = _csv_rows(fh.read(64 * 1024 * 1024))
-    except FileNotFoundError:
-        return []
     except (OSError, csv.Error) as exc:
-        log.warning("Could not read content/faq/%s (%s)", MSG_FILE, exc)
-        return []
+        log.warning("Could not read content/faq/%s (%s)", MSG_OLD_CSV, exc)
+        return None
     rows = [r for r in rows if any(c.strip() for c in r)]
-    if not rows:
-        return []
-    head = [c.strip().lower() for c in rows[0]]
-    if "message" not in head and "email" not in head:
-        log.warning("content/faq/%s has no header row (expected: %s)", MSG_FILE, ",".join(MSG_COLUMNS[:6]) + ",...")
-        return []
+    head = [c.strip().lower() for c in rows[0]] if rows else []
+    if rows and "message" not in head and "email" not in head:
+        log.warning("content/faq/%s has no header row; it was left alone", MSG_OLD_CSV)
+        return None
     out = []
-    for raw in rows[1:]:
-        row = {}
-        extra = {}
-        for i, name in enumerate(head):
-            cell = _csv_unsafe(raw[i]) if i < len(raw) else ""
-            if name in MSG_COLUMNS:
-                row[name] = cell
-            elif name:
-                extra[name] = cell
-        for col in MSG_COLUMNS:
-            row.setdefault(col, "")
-        row["status"] = "done" if row["status"].strip().lower() == "done" else "new"
-        if not row["id"].strip():
-            row["id"] = "r%08x" % zlib.crc32("|".join(raw).encode("utf-8"))
-        row["_extra"] = extra          # columns somebody added by hand are kept when the file is rewritten
-        out.append(row)
+    for i, raw in enumerate(rows[1:]):
+        out.append(_normalise_message({name: _csv_unsafe(raw[j]) if j < len(raw) else "" for j, name in enumerate(head) if name}, i))
     return out
+
+
+def _load_messages_unlocked():
+    """(messages, ok). ok is False when messages.json exists but cannot be understood (it is then left untouched)."""
+    path = _msg_path()
+    if not os.path.isfile(path):
+        if os.path.isfile(_old_msg_csv_path()):
+            rows = _import_old_messages_csv()
+            if rows is not None:
+                _write_messages_unlocked(rows)
+                kept = os.path.join(_faq_dir(), "messages.imported-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv")
+                try:
+                    os.replace(_old_msg_csv_path(), kept)
+                except OSError:
+                    pass
+                log.info("content/faq: moved %d message(s) from messages.csv into messages.json", len(rows))
+                return rows, True
+        return [], True
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read(64 * 1024 * 1024).decode("utf-8-sig")
+        data = json.loads(text) if text.strip() else []
+    except (OSError, ValueError) as exc:
+        log.warning("Could not read content/faq/%s (%s)", MSG_FILE, exc)
+        return [], False
+    if isinstance(data, dict):               # {"messages": [...]} is accepted too
+        data = data.get("messages")
+    if not isinstance(data, list):
+        log.warning("content/faq/%s is not a list of messages", MSG_FILE)
+        return [], False
+    return [_normalise_message(r, i) for i, r in enumerate(data) if isinstance(r, dict)], True
+
+
+def _read_messages_unlocked():
+    return _load_messages_unlocked()[0]
 
 
 def read_messages():
@@ -1919,6 +1961,24 @@ def read_messages():
 
 
 def _write_messages_unlocked(rows):
+    out = []
+    for r in rows:
+        item = {c: r.get(c, "") for c in MSG_COLUMNS}
+        for key, value in r.get("_extra", {}).items():
+            item.setdefault(key, value)
+        out.append(item)
+    os.makedirs(_faq_dir(), exist_ok=True)
+    _atomic_write(_msg_path(), json.dumps(out, ensure_ascii=False, indent=2) + "\n")
+
+
+def messages_file_unreadable():
+    """True when messages.json exists but is not valid (for example a comma was deleted while editing it by hand)."""
+    with _data_lock():
+        return not _load_messages_unlocked()[1]
+
+
+def messages_csv_text(rows):
+    """The messages as CSV text for the download button (formula-looking cells are neutralised for Excel)."""
     extra = []
     for r in rows:
         for key in r.get("_extra", {}):
@@ -1929,28 +1989,19 @@ def _write_messages_unlocked(rows):
     writer.writerow(MSG_COLUMNS + extra)
     for r in rows:
         writer.writerow([_csv_safe(r.get(c, "")) for c in MSG_COLUMNS]
-                        + [_csv_safe(r.get("_extra", {}).get(k, "")) for k in extra])
-    os.makedirs(_faq_dir(), exist_ok=True)
-    _atomic_write(_msg_path(), "﻿" + out.getvalue())
-
-
-def messages_file_unreadable():
-    """True when messages.csv has content but no message could be read from it (for example its header row was deleted)."""
-    try:
-        return os.path.getsize(_msg_path()) > 3 and not read_messages()
-    except OSError:
-        return False
+                        + [_csv_safe("" if r.get("_extra", {}).get(k) is None else str(r["_extra"][k])) for k in extra])
+    return "\ufeff" + out.getvalue()
 
 
 def add_message(row):
     """Append one message. Returns False when the file is full."""
     with _data_lock():
-        rows = _read_messages_unlocked()
+        rows, ok = _load_messages_unlocked()
         if len(rows) >= MSG_MAX_ROWS:
             return False
-        if not rows and os.path.isfile(_msg_path()) and os.path.getsize(_msg_path()) > 3:
+        if not ok:
             # the file has content that cannot be read: keep it aside instead of writing over it
-            kept = os.path.join(_faq_dir(), "messages.unreadable-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv")
+            kept = os.path.join(_faq_dir(), "messages.unreadable-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".json")
             shutil.copy2(_msg_path(), kept)
             log.warning("content/faq/%s could not be read; a copy was kept as %s", MSG_FILE, os.path.basename(kept))
         rows.append(row)
@@ -1960,7 +2011,9 @@ def add_message(row):
 
 def update_message(msg_id, **fields):
     with _data_lock():
-        rows = _read_messages_unlocked()
+        rows, ok = _load_messages_unlocked()
+        if not ok:
+            return False
         for r in rows:
             if r["id"] == msg_id:
                 r.update(fields)
@@ -1972,7 +2025,9 @@ def update_message(msg_id, **fields):
 def pop_message(msg_id):
     """Remove one message from the file and return it (None when there is no such message)."""
     with _data_lock():
-        rows = _read_messages_unlocked()
+        rows, ok = _load_messages_unlocked()
+        if not ok:
+            return None
         for i, r in enumerate(rows):
             if r["id"] == msg_id:
                 rows.pop(i)
@@ -3486,13 +3541,11 @@ def message_delete(msg_id):
 
 @admin_bp.route("/messages/download")
 def messages_download():
-    if not os.path.isfile(_msg_path()):
+    rows = read_messages()
+    if not rows:
         flash("There are no messages yet.", "error")
         return redirect(url_for("admin.messages"))
-    with _data_lock():
-        with open(_msg_path(), "rb") as fh:
-            data = fh.read()
-    resp = Response(data, mimetype="text/csv; charset=utf-8")
+    resp = Response(messages_csv_text(rows).encode("utf-8"), mimetype="text/csv; charset=utf-8")
     resp.headers["Content-Disposition"] = f'attachment; filename="messages-{now_bd().strftime("%Y-%m-%d")}.csv"'
     return resp
 
@@ -3866,7 +3919,7 @@ def trash_restore(name):
             return redirect(url_for("admin.trash"))
         row = {c: _text(row.get(c)) for c in MSG_COLUMNS} | {"_extra": {}}
         if not any(r["id"] == row["id"] for r in read_messages()) and not add_message(row):
-            flash("Cannot restore: messages.csv is full.", "error")
+            flash("Cannot restore: the messages file is full.", "error")
             return redirect(url_for("admin.trash"))
         shutil.rmtree(src, ignore_errors=True)
         log.info("admin: restored a message from the trash")
@@ -4887,6 +4940,9 @@ FB_ARCHIVE_EXTS = {".zip"}
 FB_ALLOWED_EXTS = FB_IMAGE_EXTS | FB_DOC_EXTS | FB_MEDIA_EXTS | FB_ARCHIVE_EXTS
 FB_TEXT_EXTS = {".json", ".csv", ".txt", ".md"}
 FB_EDIT_LIMIT = 512 * 1024
+FB_CSV_LIMIT = 3 * 1024 * 1024      # the table editor handles bigger files than the plain text box
+FB_CSV_MAX_ROWS = 60000
+FB_CSV_MAX_COLS = 300
 FB_MAX_NAME = 120
 FB_MAX_DEPTH = 12
 FB_SEARCH_LIMIT = 300
@@ -5081,6 +5137,7 @@ def _fb_entry(parent, entry):
         out["size"] = st.st_size
         out["url"] = url_for("media", filename=rel)
         out["text"] = ext in FB_TEXT_EXTS and st.st_size <= FB_EDIT_LIMIT
+        out["grid"] = ext == ".csv" and st.st_size <= FB_CSV_LIMIT
         out["allowed"] = ext in FB_ALLOWED_EXTS
     return out
 
@@ -5736,9 +5793,125 @@ def files_text_save():
             json.loads(text)
         except ValueError as exc:
             raise FBError(f"That is not valid JSON, so it was not saved: {exc}")
-    _atomic_write(path, text)
+    # the text box always works with LF line endings and no BOM: write the file the way it was (Excel needs the BOM to show non-English text)
+    try:
+        with open(path, "rb") as fh:
+            before = fh.read(FB_CSV_LIMIT)
+    except OSError:
+        before = b""
+    if "\r" not in text:
+        crlf, lf = before.count(b"\r\n"), before.count(b"\n") - before.count(b"\r\n")
+        if crlf and crlf >= lf:
+            text = text.replace("\n", "\r\n")
+    data = text.encode("utf-8")
+    if before.startswith(b"\xef\xbb\xbf") and not data.startswith(b"\xef\xbb\xbf"):
+        data = b"\xef\xbb\xbf" + data
+    _atomic_write(path, data)
     log.info("admin: edited '%s' in the file browser", "/".join(parts))
     return {"ok": True, "mtime": os.path.getmtime(path)}
+
+
+# ---------- the CSV table editor ----------
+# The browser edits a grid; the server parses and writes the file, so quoting, the delimiter, the BOM, the line endings and
+# the encoding of the original file stay exactly as they were.
+
+def _csv_describe(data):
+    """How a CSV file is written, so that a save can write it the same way."""
+    bom = data.startswith(b"\xef\xbb\xbf")
+    try:
+        data.decode("utf-8-sig")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        encoding = "cp1252"                           # what Excel on Windows writes
+        try:
+            data.decode("cp1252")
+        except UnicodeDecodeError:
+            encoding = "latin-1"
+    text = _decode_text(data)
+    first = next((line for line in text.splitlines() if line.strip()), "")
+    delimiter = max((",", ";", "\t"), key=first.count) if any(d in first for d in ",;\t") else ","
+    crlf, lf = text.count("\r\n"), text.count("\n") - text.count("\r\n")
+    newline = "\r\n" if crlf and crlf >= lf else "\n"
+    return {"bom": bom, "encoding": encoding, "delimiter": delimiter, "newline": newline,
+            "final_newline": text.endswith("\n") or not text}
+
+
+@admin_bp.get("/files/api/csv")
+@_fb_api
+def files_csv_read():
+    parts = _fb_parts(request.args.get("path"), allow_empty=False)
+    path = _fb_abs(parts, must_exist=True)
+    if _fb_ext(parts[-1]) != ".csv" or not os.path.isfile(path):
+        raise FBError("Only .csv files open in the table editor.")
+    if os.path.getsize(path) > FB_CSV_LIMIT:
+        raise FBError(f"That file is larger than {FB_CSV_LIMIT // (1024 * 1024)} MB; download it to edit it.")
+    with _data_lock():
+        with open(path, "rb") as fh:
+            data = fh.read()
+        mtime = os.path.getmtime(path)
+    fmt = _csv_describe(data)
+    try:
+        text = data.decode("utf-8-sig") if fmt["encoding"] == "utf-8" else data.decode(fmt["encoding"])
+        rows = list(csv.reader(io.StringIO(text, newline=""), delimiter=fmt["delimiter"]))
+    except csv.Error as exc:
+        raise FBError(f"That file is not valid CSV ({exc}); use the text editor instead.")
+    if len(rows) > FB_CSV_MAX_ROWS:
+        raise FBError(f"That file has more than {FB_CSV_MAX_ROWS} rows; download it to edit it.")
+    width = max((len(r) for r in rows), default=0)
+    if width > FB_CSV_MAX_COLS:
+        raise FBError(f"That file has more than {FB_CSV_MAX_COLS} columns; use the text editor instead.")
+    ragged = any(len(r) != width for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    return {"ok": True, "rows": rows, "format": fmt, "mtime": mtime, "name": parts[-1], "ragged": ragged,
+            "text_ok": os.path.getsize(path) <= FB_EDIT_LIMIT}
+
+
+@admin_bp.post("/files/api/csv")
+@_fb_api
+def files_csv_save():
+    body = _fb_body()
+    parts = _fb_parts(body.get("path"), allow_empty=False)
+    path = _fb_abs(parts, must_exist=True)
+    if _fb_ext(parts[-1]) != ".csv" or not os.path.isfile(path):
+        raise FBError("Only .csv files open in the table editor.")
+    rows = body.get("rows")
+    if not isinstance(rows, list) or len(rows) > FB_CSV_MAX_ROWS or not all(isinstance(r, list) for r in rows):
+        raise FBError("Nothing to save.")
+    if any(len(r) > FB_CSV_MAX_COLS for r in rows):
+        raise FBError(f"A table can have at most {FB_CSV_MAX_COLS} columns.")
+    rows = [["" if c is None else str(c) for c in r] for r in rows]
+    while rows and not any(c != "" for c in rows[-1]):          # empty rows at the end are not data
+        rows.pop()
+    fmt = body.get("format") if isinstance(body.get("format"), dict) else {}
+    delimiter = fmt.get("delimiter") if fmt.get("delimiter") in (",", ";", "\t") else ","
+    newline = "\r\n" if fmt.get("newline") == "\r\n" else "\n"
+    encoding = fmt.get("encoding") if fmt.get("encoding") in ("utf-8", "cp1252", "latin-1") else "utf-8"
+    bom = bool(fmt.get("bom")) and encoding == "utf-8"
+    out = io.StringIO(newline="")
+    csv.writer(out, delimiter=delimiter, lineterminator=newline).writerows(rows)
+    text = out.getvalue()
+    if rows and fmt.get("final_newline") is False and text.endswith(newline):
+        text = text[:-len(newline)]
+    converted = None
+    try:
+        data = text.encode(encoding)
+    except UnicodeEncodeError:
+        data, encoding, bom, converted = text.encode("utf-8"), "utf-8", True, "utf-8"      # keep what was typed: switch the file to UTF-8
+    if bom:
+        data = b"\xef\xbb\xbf" + data
+    if len(data) > FB_CSV_LIMIT:
+        raise FBError(f"That is larger than {FB_CSV_LIMIT // (1024 * 1024)} MB.")
+    known = body.get("mtime")
+    with _data_lock():
+        if known is not None and not body.get("force") and abs(os.path.getmtime(path) - float(known)) > 0.01:
+            raise FBError("This file was changed by someone else (or by the site itself) since you opened it.", 409, {"changed": True})
+        _atomic_write(path, data)
+        mtime = os.path.getmtime(path)
+    log.info("admin: edited '%s' in the table editor (%d rows)", "/".join(parts), len(rows))
+    width = max((len(r) for r in rows), default=0)
+    return {"ok": True, "mtime": mtime, "rows": len(rows), "cols": width, "converted": converted,
+            "format": {"bom": bom, "encoding": encoding, "delimiter": delimiter, "newline": newline,
+                       "final_newline": text.endswith(newline) or not text}}
 
 
 # ---------- download as zip ----------

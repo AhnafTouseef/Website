@@ -3,15 +3,15 @@
 {% block content %}
 <div class="a-title">
     <h1>messages</h1>
-    <span class="sub">sent through the form on the FAQ page · stored in content/faq/messages.csv</span>
+    <span class="sub">sent through the form on the FAQ page · stored in content/faq/messages.json</span>
     <div class="right">
         {% if exists %}<a class="a-btn" href="{{ url_for('admin.messages_download') }}">download .csv</a>{% endif %}
     </div>
 </div>
 
-<div class="a-note">Each message keeps what the site learns by itself: IP address, country, city and network (looked up from the IP), device, browser, language, and where the visitor first came from (referring site or campaign tags such as <b>?utm_source=facebook&amp;utm_campaign=launch</b> on a link you share). Treat it as private: it is never shown on the website and <b>content/faq/</b> is not served publicly. Keep <b>messages.csv</b> out of GitHub.</div>
+<div class="a-note">Each message keeps what the site learns by itself: IP address, country, city and network (looked up from the IP), device, browser, language, and where the visitor first came from (referring site or campaign tags such as <b>?utm_source=facebook&amp;utm_campaign=launch</b> on a link you share). Treat it as private: it is never shown on the website and <b>content/faq/</b> is not served publicly. Keep <b>messages.json</b> out of GitHub.</div>
 
-{% if unreadable %}<div class="a-note" style="border-left-color: var(--a-red)"><b>messages.csv cannot be read.</b> It has content but no header row (the first line must be <b>id,received,status,name,email,message,...</b>). Open it in the file browser and fix the first line. Nothing was deleted; if a new message arrives meanwhile, the old file is first copied to <b>messages.unreadable-&lt;date&gt;.csv</b>.</div>{% endif %}
+{% if unreadable %}<div class="a-note" style="border-left-color: var(--a-red)"><b>messages.json cannot be read.</b> It is not valid JSON (a comma, bracket or quote is probably missing from a hand edit). Open it in the file browser and fix it. Nothing was deleted; if a new message arrives meanwhile, the old file is first copied to <b>messages.unreadable-&lt;date&gt;.json</b>.</div>{% endif %}
 
 <div class="tiles">
     <div class="tile {{ 'warn' if stats.new else 'ok' }}"><div class="k">new</div><div class="v">{{ stats.new }}</div></div>

@@ -55,24 +55,34 @@ Home page: the **2 newest** courses appear as compact side-by-side cards; with o
 Visitors are never asked for more than name, email and message. Everything else is tracked from our side.
 
 - **General FAQ:** `content/faq/faq.csv`, two columns `question,answer`. Edit it in the admin **files** section (or in Excel and upload it). A blank line inside an answer starts a new paragraph; `{site_name}` becomes the site name. It is read on every request.
-- **Messages:** the form on the FAQ page appends to `content/faq/messages.csv`. Each row: id, received (Bangladesh time), status, name, email, message, visitor_id, ip, country, region, city, isp, visitor_timezone, device, browser, os, language, first_referrer, utm_source, utm_medium, utm_campaign, landing_page, user_agent. Read them in the admin **messages** section (mark done, delete to trash, download, "who is writing to us" summary, the pages each sender viewed).
+- **Messages:** the form on the FAQ page appends to `content/faq/messages.json` (a JSON list, one object per message; a `messages.csv` from an earlier version is imported automatically the first time and kept as `messages.imported-<date>.csv`). Each message has: id, received (Bangladesh time), status, name, email, message, visitor_id, ip, country, region, city, isp, visitor_timezone, device, browser, os, language, first_referrer, utm_source, utm_medium, utm_campaign, landing_page, user_agent. Read them in the admin **messages** section (opening marks it read, delete to trash, download as CSV for Excel, "who is writing to us" summary, the pages each sender viewed).
 - **Visitor tracker:** every page a real visitor opens becomes one row in `content/analytics/visits-YYYY-MM.csv` (one file per month): time, anonymous visitor id (cookie `vid`, 400 days), new/returning, ip, country, region, city, isp, page, referring site, campaign tags, device, browser, os, language. The admin **visitors** section shows online now, today / 7 days / 30 days, visitors per day, top pages, countries, cities, networks, sources, campaigns, devices, new vs returning, and the latest activity.
 - **Enrollments per course:** the Enroll buttons on a course page go to `/course/<course>/enroll`, which records the visitor in `content/course/<course>/enrollments.csv` and sends them straight on to the course's enrol link. Admin: the **enrolled (n)** button on the courses list, or **enrollments** in the course editor. It records interest (a press of the button); whether the person then finished enrolling happens on the other site and is not visible. The same visitor pressing again within 30 minutes counts once. A duplicated course starts without the original's enrollments.
 - **Location:** the country, region, city and network of an IP address are looked up at free public services (ipwho.is, then ipapi.co) from a background thread, once per IP, and remembered (also across restarts, from the visits log). Pages are never slowed down. These services receive the IP addresses of visitors.
 - **Not tracked:** the admin console, logged-in admins, bots, and browsers that send Do Not Track or Global Privacy Control. Private and local addresses are never looked up.
 - **Env switches:** `TRACK_VISITORS=off` (no visit or enrollment rows), `GEO_LOOKUP=off` (no outside lookups, location columns stay empty), `RESPECT_DNT=off` (ignore Do Not Track), `TRUSTED_PROXIES=1` (set the number of reverse proxies in front of the app: nginx, Cloudflare, a hosting platform. Without it every IP is the proxy's).
-- **Privacy:** these files hold IP addresses and emails. They are never served at `/media/` and not shown on the website, but they are inside the transfer export (so they move with the site). Keep them out of GitHub: add `content/faq/messages.csv`, `content/analytics/`, `content/course/*/enrollments.csv` and `content/.datalock` to `.gitignore`. Consider a short privacy page that tells visitors what is recorded.
-- Form protection: a hidden field, a minimum fill-in time, 5 messages per hour per IP. Files are plain CSV (UTF-8 with BOM) and are written under a lock, so simultaneous visitors cannot corrupt them.
+- **Privacy:** these files hold IP addresses and emails. They are never served at `/media/` and not shown on the website, but they are inside the transfer export (so they move with the site). Keep them out of GitHub: add `content/faq/messages.json`, `content/analytics/`, `content/course/*/enrollments.csv` and `content/.datalock` to `.gitignore`. Consider a short privacy page that tells visitors what is recorded.
+- Form protection: a hidden field, a minimum fill-in time, 5 messages per hour per IP. The log files are plain CSV (UTF-8 with BOM), messages are JSON, and all are written under a lock, so simultaneous visitors cannot corrupt them.
 
 ## Contact details, footer and payment instructions
 
-All of it lives in one file, `content/site/contact.json`, edited in the admin **contact** section (nothing is hard-coded in Python or in the templates). A field left empty is simply not shown anywhere.
+All of it lives in one file, `content/site/contact.json`, edited in the admin **Profile** page (Contact section) (nothing is hard-coded in Python or in the templates). A field left empty is simply not shown anywhere.
 
 - **Ways to reach you** (email, phone, WhatsApp number, location, reply promise) show in the footer of every page and in the contact box on the FAQ page. The email becomes a mail link, the phone a tap-to-call link, the WhatsApp number a `wa.me` chat link (`01XXXXXXXXX` is read as a Bangladesh number, `+880...`).
 - **Social accounts** (Facebook, Instagram, YouTube, LinkedIn, TikTok, Telegram, X, GitHub): paste the link, or an `@handle` for Instagram, TikTok, Telegram, X and GitHub. A link must point at its own platform, so a typo cannot send visitors elsewhere; `javascript:` and similar links are refused. Filled ones appear in the footer's Follow column and on the FAQ page.
 - **Footer text** under the logo and the small **bottom line**. The `(c) year` and the site name are automatic.
 - **Payment:** the "How to pay with bKash" box above the Enroll button on every course page: a number with a Copy button and the instructions (a blank line starts a new paragraph). A single course can use its own instructions in its editor (`payment_instructions` in `meta.json`); the site-wide number is still shown. The box is hidden while the course has no enroll link, or while both the number and the instructions are empty.
 - The file is not served at `/media/`. A missing or damaged file falls back to the defaults and the page still opens in admin so it can be saved again.
+
+## CSV table editor
+
+Double-click any `.csv` in the admin Files browser (`faq.csv`, a course's `curriculum.csv`, the visitor logs...) and it opens as a table instead of a text box.
+
+- **Editing:** click a cell and type (replaces it); Enter or double-click edits the existing text; Tab / Enter move on; Esc cancels; Alt+Enter is a line break inside a cell. Arrow keys, Shift+arrows (select a block), Ctrl+arrows, Home/End and Page Up/Down move around. Delete clears the selection.
+- **Rows and columns:** `+ row`, `+ column`, delete, Alt+Up / Alt+Down move rows, a right-click menu (insert above/below, duplicate, delete) and a menu on every column header (insert, delete, move, sort A to Z or Z to A). Drag a header edge to resize a column.
+- **Excel:** copy and paste cells as tab-separated text, in both directions. Pasting one value into a selected block fills the block.
+- **Safety:** Ctrl+Z / Ctrl+Y undo and redo, an "unsaved changes" warning before closing, and a warning when the file was changed by someone else (or by the site itself) while you were editing. The file is written back the way it was: same delimiter (comma, semicolon or tab), same BOM, same line endings, same encoding. If you type characters an old Windows-1252 file cannot hold, it becomes UTF-8 and you are told.
+- **Notes:** short rows are filled out to the width of the table, and empty rows at the end are dropped. Files up to 3 MB and 60,000 rows open (only the visible rows are drawn, so big files stay quick); "edit as text" is still available for files up to 512 KB. The plain text box now also keeps a file's BOM and Windows line endings when saving.
 
 ## Phone layout: cards in two columns
 
@@ -110,11 +120,11 @@ Nothing can be loaded from elsewhere and a picture cannot cover the page.
 ## Moving to another server (zip for content)
 
 Courses, instructors, webinars, images and logos are your data, not code, and live in `content/`. The code can move
-by whatever means you use; the content moves through the admin **transfer** page:
+by whatever means you use; the content moves through the **Transfer** section at the bottom of the admin Files page:
 
-1. **Old server:** admin, *transfer*, tick the parts, *download the content zip* (images, PDFs and every file of every course, instructor and webinar, plus `branding.json`).
+1. **Old server:** admin, *Files*, scroll to *Transfer*, tick the parts, *download the content zip* (images, PDFs and every file of every course, instructor and webinar, plus `branding.json`).
 2. **New server:** put the code there, `pip install -r requirements.txt`, `python app.py` (a fresh admin password and secret key are generated; set your own with `ADMIN_PASSWORD` / `SECRET_KEY`).
-3. **New server:** admin, *transfer*, drop the zip on the import box. You see what it contains and how much already exists, then choose *add only what is new*, *add and overwrite* or *make this server match the zip* (which first moves the current content to the trash, so it is restorable).
+3. **New server:** admin, *Files*, scroll to *Transfer*, drop the zip on the import box. You see what it contains and how much already exists, then choose *add only what is new*, *add and overwrite* or *make this server match the zip* (which first moves the current content to the trash, so it is restorable).
 
 The zip never contains code, the admin password, the secret key, the trash or hidden files. It is checked while importing: only allowed file types, real file contents, no paths leaving `content/`, size and entry limits.
 
@@ -251,16 +261,16 @@ What it does:
 
 | Page | Purpose |
 |---|---|
-| courses | every folder in `content/course/` incl. hidden and broken ones; stats, health warnings, raw `meta.json` / `curriculum.csv`, file list; edit, publish/hide, duplicate, delete |
-| + new / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; live `meta.json` preview; Ctrl+S to save |
-| instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
-| webinars | add, edit, hide and delete live sessions (see below) |
-| contact | email, phone, WhatsApp, location, social accounts, footer text, bKash number and payment instructions |
-| branding | logo, hero picture and hero text (see below) |
-| trash | deleted courses, instructors and webinars are moved to `_trash/` (outside `content/`), restorable or deletable forever |
-| files | the file browser (below) |
-| transfer | export / import all content as one zip (below) |
-| system | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
+| Courses | every folder in `content/course/` incl. hidden and broken ones; stats, health warnings, raw `meta.json` / `curriculum.csv`, file list; edit, publish/hide, duplicate, delete, enrolment list |
+| + new course / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; per-course payment instructions; live `meta.json` preview; Ctrl+S to save |
+| Webinars | add, edit, hide and delete live sessions (see below) |
+| Instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
+| Files | the file browser (below), and under it **Transfer**: export / import all content as one zip. Every `.csv` opens in a **table editor** (below) |
+| Profile | one page, one Save button: **Branding** (logos, home slide; see below) and **Contact** (email, phone, WhatsApp, location, social accounts, footer text, bKash number and payment instructions) |
+| Visitors | who visits the site, by day, country, device and source |
+| Messages | the FAQ form inbox: one line per message like a mail app; click a line to read it in a popup, which also marks it as read (reply, mark as unread, delete) |
+| Trash | deleted courses, instructors, webinars, files and messages are moved to `_trash/` (outside `content/`), restorable or deletable forever |
+| System | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
 
 ### Instructors section
 
@@ -302,7 +312,7 @@ The site never trusts the visitor's device clock. The server keeps its own clock
 - Set `TIME_SYNC=off` to skip the online check (e.g. offline development, tests).
 - Keep the server's own clock reasonably right too (NTP is on by default on most hosts); it is the fallback.
 
-### Branding section
+### Branding (top half of the Profile page)
 
 Logo, hero picture and hero text are managed here, not in code. Settings are saved in `content/logo/branding.json`; if it is missing or damaged the defaults are used.
 
