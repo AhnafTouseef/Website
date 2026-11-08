@@ -78,6 +78,8 @@ All of it lives in one file, `content/site/contact.json`, edited in the admin **
 
 Double-click any `.csv` in the admin Files browser (`faq.csv`, a course's `curriculum.csv`, the visitor logs...) and it opens as a table instead of a text box.
 
+The same table editor is used for the **curriculum** in the course editor: it replaces the plain text box, and what you type is written to the form (and so to `curriculum.csv`) when you press *save changes*. Importing an Excel / CSV file redraws the table.
+
 - **Editing:** click a cell and type (replaces it); Enter or double-click edits the existing text; Tab / Enter move on; Esc cancels; Alt+Enter is a line break inside a cell. Arrow keys, Shift+arrows (select a block), Ctrl+arrows, Home/End and Page Up/Down move around. Delete clears the selection.
 - **Rows and columns:** `+ row`, `+ column`, delete, Alt+Up / Alt+Down move rows, a right-click menu (insert above/below, duplicate, delete) and a menu on every column header (insert, delete, move, sort A to Z or Z to A). Drag a header edge to resize a column.
 - **Excel:** copy and paste cells as tab-separated text, in both directions. Pasting one value into a selected block fills the block.
@@ -265,11 +267,11 @@ What it does:
 | + new course / edit | form for all `meta.json` fields incl. optional discount % with a live "was / now" preview; curriculum import from an Excel (`.xlsx`) or CSV file (drag and drop; first sheet; **all columns and rows are kept exactly as in the sheet**, dates and numbers formatted as Excel shows them, hidden rows/columns left out) with a live table preview and the text box still editable; thumbnail uploader with drag and drop, 16:9 preview, one-click remove with undo; per-course payment instructions; live `meta.json` preview; Ctrl+S to save |
 | Webinars | add, edit, hide and delete live sessions (see below) |
 | Instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
-| Files | the file browser (below), and under it **Transfer**: export / import all content as one zip. Every `.csv` opens in a **table editor** (below) |
+| Files | the file browser (below), and under it **Transfer**: export / import all content as one zip. Every `.csv` opens in a **table editor** (below). Drag a rectangle over empty space or the size / date columns to select several items (Ctrl or Shift adds to the selection) |
 | Profile | one page, one Save button: **Branding** (logos, home slide; see below) and **Contact** (email, phone, WhatsApp, location, social accounts, footer text, bKash number and payment instructions) |
 | Visitors | who visits the site, by day, country, device and source |
 | Messages | the FAQ form inbox: one line per message like a mail app; click a line to read it in a popup, which also marks it as read (reply, mark as unread, delete) |
-| Trash | deleted courses, instructors, webinars, files and messages are moved to `_trash/` (outside `content/`), restorable or deletable forever |
+| Trash | deleted courses, instructors, webinars, files and messages are moved to `_trash/` (outside `content/`), restorable or deletable forever. The type column shows the file's extension (`csv`, `jpg`, …, `folder`); click any column heading to sort, click again to reverse |
 | System | versions, paths, registered routes, instructors/logos/webinars found, the site clock and its status, recent log |
 
 ### Instructors section

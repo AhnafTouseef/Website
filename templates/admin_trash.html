@@ -18,13 +18,20 @@
     <header><b>_trash/</b></header>
     {% if items %}
     <div class="scroll-x">
-    <table class="t">
-        <thead><tr><th>name</th><th>type</th><th>folder</th><th>deleted</th><th class="num">files</th><th class="num">size</th><th>actions</th></tr></thead>
+    <table class="t" id="trash-table">
+        <thead><tr>
+            <th class="sortable" data-key="name" data-type="text" aria-sort="none" tabindex="0">name</th>
+            <th class="sortable" data-key="type" data-type="text" aria-sort="none" tabindex="0">type</th>
+            <th class="sortable" data-key="folder" data-type="text" aria-sort="none" tabindex="0">folder</th>
+            <th class="sortable" data-key="deleted" data-type="num" aria-sort="descending" tabindex="0">deleted</th>
+            <th class="sortable num" data-key="files" data-type="num" aria-sort="none" tabindex="0">files</th>
+            <th class="sortable num" data-key="size" data-type="num" aria-sort="none" tabindex="0">size</th>
+            <th>actions</th></tr></thead>
         <tbody>
         {% for i in items %}
-            <tr class="row">
+            <tr class="row" data-name="{{ i.title|lower }}" data-type="{{ i.label }}" data-folder="{{ i.name }}" data-deleted="{{ i.deleted }}" data-files="{{ i.files }}" data-size="{{ i.size }}">
                 <td class="cell-title">{{ i.title }}</td>
-                <td><span class="chip {{ {'instructor': 'hidden', 'webinar': 'draft', 'course': 'published', 'file': 'tba', 'message': 'draft'}[i.kind] }}">{{ i.kind }}</span></td>
+                <td><span class="chip {{ {'instructor': 'hidden', 'webinar': 'draft', 'course': 'published', 'file': 'tba', 'message': 'draft'}[i.kind] }}">{{ i.label }}</span></td>
                 <td class="dim mono-sm">{{ i.name }}</td>
                 <td class="mono-sm nowrap">{{ i.deleted|fmt_ts }} <span class="dim">({{ i.deleted|ago }})</span></td>
                 <td class="num">{{ i.files }}</td>
@@ -50,6 +57,26 @@
 
 {% block scripts %}
 <script>
+(function () {
+    var table = document.getElementById('trash-table');
+    if (!table) return;
+    var body = table.tBodies[0], heads = Array.prototype.slice.call(table.querySelectorAll('th.sortable'));
+    function sortBy(th, dir) {
+        var key = th.getAttribute('data-key'), num = th.getAttribute('data-type') === 'num';
+        var rows = Array.prototype.slice.call(body.rows).map(function (r, i) { return { r: r, i: i, v: r.getAttribute('data-' + key) || '' }; });
+        rows.sort(function (a, b) {
+            var c = num ? (parseFloat(a.v) || 0) - (parseFloat(b.v) || 0) : a.v.localeCompare(b.v, undefined, { numeric: true, sensitivity: 'base' });
+            return (dir === 'ascending' ? c : -c) || a.i - b.i;
+        });
+        rows.forEach(function (x) { body.appendChild(x.r); });
+        heads.forEach(function (h) { h.setAttribute('aria-sort', h === th ? dir : 'none'); });
+    }
+    heads.forEach(function (th) {
+        function go() { sortBy(th, th.getAttribute('aria-sort') === 'ascending' ? 'descending' : 'ascending'); }
+        th.addEventListener('click', go);
+        th.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+})();
 document.addEventListener('submit', function (e) {
     var msg = e.target.getAttribute && e.target.getAttribute('data-confirm');
     if (msg && !window.confirm(msg)) e.preventDefault();

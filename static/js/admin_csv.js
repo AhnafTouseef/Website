@@ -8,6 +8,7 @@
     var hooks = null;           // { api, modal, toast, reload, textEditor } given by admin_files.js
     var S = null;               // the open table
     var dlg, ui = {};
+    var INL = null;             // set when the table lives inside a page (the course editor) instead of the file browser dialog: { onChange(rows) }
 
     function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
     function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -18,11 +19,11 @@
 
     /* ---------- building the dialog once ---------- */
 
-    function build() {
+    function build(host) {
         if (dlg) return;
-        dlg = el('dialog', 'fb-dlg gx');
+        dlg = host ? el('div', 'gx gx-inline') : el('dialog', 'fb-dlg gx');
         dlg.innerHTML =
-            '<div class="gx-top">' +
+            '<div class="gx-top"' + (host ? ' hidden' : '') + '>' +
             '<b class="gx-name"></b><span class="dim gx-state"></span><span class="a-spacer"></span>' +
             '<button type="button" class="a-btn small primary" data-act="save">save (Ctrl+S)</button>' +
             '<button type="button" class="a-btn small" data-act="astext" title="Open the same file in the plain text box">edit as text</button>' +
@@ -39,14 +40,14 @@
             '<input type="search" class="gx-find" placeholder="find (Ctrl+F)…" aria-label="Find in this table">' +
             '<button type="button" class="a-btn small" data-act="findprev" title="Shift+Enter">↑</button>' +
             '<button type="button" class="a-btn small" data-act="findnext" title="Enter">↓</button>' +
-            '<label class="gx-chk"><input type="checkbox" class="gx-hdr" checked> first row is the header</label>' +
+            '<label class="gx-chk"' + (host ? ' hidden' : '') + '><input type="checkbox" class="gx-hdr" checked> first row is the header</label>' +
             '<span class="a-spacer"></span><span class="dim gx-info"></span></div>' +
             '<div class="gx-bar"><b class="gx-addr"></b><span class="gx-full"></span></div>' +
             '<div class="gx-scroll" tabindex="0"><div class="gx-head"></div><div class="gx-sizer"><div class="gx-body"></div></div></div>' +
             '<textarea class="gx-edit" spellcheck="false" hidden></textarea>' +
             '<div class="gx-msg"></div>' +
             '<div class="fb-menu gx-menu" hidden></div>';
-        document.body.appendChild(dlg);
+        (host || document.body).appendChild(dlg);
         ui = {
             name: dlg.querySelector('.gx-name'), state: dlg.querySelector('.gx-state'), info: dlg.querySelector('.gx-info'),
             addr: dlg.querySelector('.gx-addr'), full: dlg.querySelector('.gx-full'), msg: dlg.querySelector('.gx-msg'),
@@ -111,6 +112,7 @@
         S.anchor.r = clamp(S.anchor.r, 0, S.rows.length - 1); S.anchor.c = clamp(S.anchor.c, 0, ncols() - 1);
         ui.state.textContent = dirty() ? '● unsaved changes' : '';
         renderAll();
+        if (INL) INL.onChange(S.rows);
     }
 
     function cloneRows(rows, touched) {       // touched: row numbers about to change
@@ -284,10 +286,11 @@
         ui.body.innerHTML = html;
     }
     function renderInfo() {
+        if (INL) { var n0 = S.rows.length - bodyStart(); ui.info.textContent = n0 + ' row' + (n0 === 1 ? '' : 's') + ' × ' + ncols() + ' col' + (ncols() === 1 ? '' : 's'); }
         var f = S.fmt, enc = f.encoding === 'utf-8' ? 'UTF-8' + (f.bom ? ' with BOM' : '') : (f.encoding === 'cp1252' ? 'Windows-1252' : 'Latin-1');
         var dl = f.delimiter === '\t' ? 'tab' : (f.delimiter === ';' ? 'semicolon' : 'comma');
         var rows = S.rows.length - bodyStart();
-        ui.info.textContent = rows + ' row' + (rows === 1 ? '' : 's') + ' × ' + ncols() + ' col' + (ncols() === 1 ? '' : 's') + ' · ' + enc + ' · ' + dl + ' separated';
+        if (!INL) ui.info.textContent = rows + ' row' + (rows === 1 ? '' : 's') + ' × ' + ncols() + ' col' + (ncols() === 1 ? '' : 's') + ' · ' + enc + ' · ' + dl + ' separated';
         var a = S.active, v = S.rows[a.r][a.c] || '';
         ui.addr.textContent = letters(a.c) + (a.r + 1);
         ui.full.textContent = v.length > 600 ? v.slice(0, 600) + '…' : v;
@@ -555,7 +558,7 @@
         });
         dlg.addEventListener('close', function () { S = null; ui.edit.hidden = true; hideMenu(); hooks.reload(true); });
         dlg.addEventListener('keydown', function (e) {
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+            if (!INL && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
         });
     }
 
@@ -596,5 +599,22 @@
         document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     }
 
-    window.FBGrid = { open: open, _parseTsv: parseTsv };
+    /* the same table, drawn inside a page. rows come in as an array of arrays, every change goes out through onChange(rows) */
+    function setRows(rows) {
+        rows = rows && rows.length && rows[0].length ? rows : [['']];
+        S = { entry: null, rows: rows, saved: rows, fmt: { encoding: 'utf-8', bom: false, delimiter: ',' }, mtime: 0, hdr: true, textOk: false,
+              active: { r: 0, c: 0 }, anchor: { r: 0, c: 0 }, undo: [], redo: [], widths: [], editing: null, dragging: false, findAt: null };
+        autosize(); ui.edit.hidden = true; ui.msg.textContent = '';
+        ui.scroll.scrollTop = 0; ui.scroll.scrollLeft = 0;
+        renderAll();
+    }
+    function inline(host, rows, onChange) {
+        INL = { onChange: onChange };
+        hooks = { toast: function () {}, modal: function () { return Promise.resolve({ value: null }); }, api: function () { return Promise.resolve({ ok: false }); }, reload: function () {}, textEditor: function () {} };
+        build(host);
+        setRows(rows);
+        return { set: setRows, rows: function () { return S.rows; } };
+    }
+
+    window.FBGrid = { open: open, inline: inline, _parseTsv: parseTsv };
 })();

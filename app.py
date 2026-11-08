@@ -2889,6 +2889,7 @@ def _trash_items():
         if not m or name.startswith(".") or not os.path.isdir(path):
             continue
         slug = m.group("slug")
+        label = None
         kind = ("instructor" if slug.startswith(TRASH_INSTRUCTOR_PREFIX)
                 else "webinar" if slug.startswith(TRASH_WEBINAR_PREFIX)
                 else "file" if slug.startswith(TRASH_FILE_PREFIX)
@@ -2902,6 +2903,10 @@ def _trash_items():
             origin, _ = _read_json_checked(os.path.join(path, "origin.json"))
             title = "content/" + _text((origin or {}).get("path"))
             slug = _text((origin or {}).get("path"))
+            if (origin or {}).get("dir"):
+                label = "folder"
+            else:
+                label = os.path.splitext(slug)[1].lstrip(".").lower()[:12] or "file"
         elif kind == "instructor":
             slug = slug[len(TRASH_INSTRUCTOR_PREFIX):]
             meta, _ = _read_json_checked(os.path.join(path, "profile.json"))
@@ -2917,6 +2922,7 @@ def _trash_items():
         items.append({
             "name": name,
             "kind": kind,
+            "label": label or kind,
             "slug": slug,
             "title": title or slug,
             "deleted": datetime.strptime(m.group("ts"), "%Y%m%d-%H%M%S").timestamp(),

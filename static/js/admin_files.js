@@ -382,6 +382,7 @@
     }
 
     listEl.addEventListener('click', function (e) {
+        if (bandSkipClick) { bandSkipClick = false; return; }
         var th = e.target.closest('th.fb-sortable');
         if (th) { setSort(th.dataset.sort); return; }
         var item = e.target.closest('.fb-item');
@@ -426,6 +427,71 @@
     searchEl.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') { searchEl.value = ''; state.search = ''; load(); searchEl.blur(); }
     });
+
+    /* ---------- box selection: drag a rectangle over empty space (or over the size / date / type columns) ---------- */
+
+    var band = null, bandSkipClick = false;
+    listEl.addEventListener('mousedown', function (e) {
+        if (e.button !== 0 || e.target.closest('th, .fb-cb, .fb-c-name, .fb-empty, a, button, input')) return;
+        var item = e.target.closest('.fb-item');
+        if (item && item.classList.contains('fb-card')) return;          // a card is a drag handle itself: only the gaps between cards start a box
+        var rect = listEl.getBoundingClientRect();
+        if (e.clientX >= rect.left + listEl.clientWidth || e.clientY >= rect.top + listEl.clientHeight) return;     // the scrollbars
+        var startX = e.clientX - rect.left + listEl.scrollLeft, startY = e.clientY - rect.top + listEl.scrollTop;
+        var base = (e.ctrlKey || e.metaKey || e.shiftKey) ? state.sel.slice() : [];
+        var moved = false, lastX = e.clientX, lastY = e.clientY, raf = 0, scrollRaf = 0;
+        if (item) item.draggable = false;                                           // the row would otherwise start a file drag instead
+        function hits(box) {
+            var out = [];
+            itemEls().forEach(function (n) {
+                var r = n.getBoundingClientRect(), lr = listEl.getBoundingClientRect();
+                var x1 = r.left - lr.left + listEl.scrollLeft, y1 = r.top - lr.top + listEl.scrollTop, x2 = x1 + r.width, y2 = y1 + r.height;
+                if (x2 >= box.x1 && x1 <= box.x2 && y2 >= box.y1 && y1 <= box.y2) out.push(n.dataset.path);
+            });
+            return out;
+        }
+        function update() {
+            raf = 0;
+            var lr = listEl.getBoundingClientRect();
+            var curX = clamp(lastX - lr.left + listEl.scrollLeft, 0, listEl.scrollWidth), curY = clamp(lastY - lr.top + listEl.scrollTop, 0, listEl.scrollHeight);
+            var box = { x1: Math.min(startX, curX), y1: Math.min(startY, curY), x2: Math.max(startX, curX), y2: Math.max(startY, curY) };
+            band.style.left = box.x1 + 'px'; band.style.top = box.y1 + 'px'; band.style.width = (box.x2 - box.x1) + 'px'; band.style.height = (box.y2 - box.y1) + 'px';
+            var now = hits(box), merged = base.slice();
+            now.forEach(function (p) { if (merged.indexOf(p) < 0) merged.push(p); });
+            select(merged, now.length ? now[0] : state.anchor);
+        }
+        function schedule() { if (!raf) raf = requestAnimationFrame(update); }
+        function autoscroll() {
+            scrollRaf = 0;
+            if (!band) return;
+            var lr = listEl.getBoundingClientRect(), dy = 0;
+            if (lastY < lr.top + 28) dy = -Math.ceil((lr.top + 28 - lastY) / 3);
+            else if (lastY > lr.bottom - 28) dy = Math.ceil((lastY - (lr.bottom - 28)) / 3);
+            if (dy) { listEl.scrollTop += dy; schedule(); }
+            scrollRaf = requestAnimationFrame(autoscroll);
+        }
+        function move(ev) {
+            lastX = ev.clientX; lastY = ev.clientY;
+            if (!moved) {
+                if (Math.abs(lastX - e.clientX) < 5 && Math.abs(lastY - e.clientY) < 5) return;
+                moved = true;
+                band = el('div', 'fb-band'); listEl.appendChild(band);
+                if (window.getSelection) window.getSelection().removeAllRanges();
+                scrollRaf = requestAnimationFrame(autoscroll);
+            }
+            schedule();
+        }
+        function up() {
+            document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+            if (item) item.draggable = true;
+            if (band) { band.remove(); band = null; bandSkipClick = true; setTimeout(function () { bandSkipClick = false; }, 0); }
+            if (raf) cancelAnimationFrame(raf);
+            if (scrollRaf) cancelAnimationFrame(scrollRaf);
+        }
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+        if (moved === false) e.preventDefault();                                    // no text selection while boxing
+    });
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
     /* ---------- opening things ---------- */
 

@@ -168,8 +168,9 @@
                         <a href="{{ url_for('admin.curriculum_template') }}">download template</a></div>
                     <div class="dz-status" id="csv-status" role="status" aria-live="polite"></div>
                 </div>
-                <label class="l" for="f-csv" style="display:block; margin:.9rem 0 .3rem; color:var(--a-dim); font-size:.76rem; text-transform:uppercase; letter-spacing:.07em">or edit as text</label>
-                <textarea id="f-csv" name="curriculum_csv" rows="12" spellcheck="false" style="white-space:pre; overflow:auto">{{ form.csv }}</textarea>
+                <label class="l" style="display:block; margin:.9rem 0 .3rem; color:var(--a-dim); font-size:.76rem; text-transform:uppercase; letter-spacing:.07em">edit the table <span class="dim" style="text-transform:none; letter-spacing:0">· double-click or press Enter to edit a cell · paste from Excel works · right-click for row and column actions</span></label>
+                <div id="csv-grid"></div>
+                <textarea id="f-csv" name="curriculum_csv" hidden>{{ form.csv }}</textarea>
                 <div class="csv-preview" id="csv-preview"></div>
             </div>
         </section>
@@ -239,6 +240,7 @@
 
 {% block scripts %}
 <script src="{{ asset('js/admin_imgstyle.js') }}"></script>
+<script src="{{ asset('js/admin_csv.js') }}"></script>
 <script>
 (function () {
     var form = document.getElementById('editor');
@@ -370,7 +372,7 @@
     }
     function renderCsv() {
         var g = normGrid(parseCsv(csvArea.value));
-        if (!g.length) { csvBox.innerHTML = '<div class="dim">no curriculum yet. Import a file above or paste CSV below. The course page hides this section while it is empty.</div>'; return; }
+        if (!g.length) { csvBox.innerHTML = '<div class="dim">no curriculum yet. Import a file above or type into the table. The course page hides this section while it is empty.</div>'; return; }
         var chain = g[0].map(function () { return false; });
         var html = '<div class="dim" style="margin-bottom:.4rem">preview: ' + (g.length - 1) + ' row(s) × ' + g[0].length + ' column(s), shown on the course page like this</div>';
         html += '<div class="scroll-x"><table class="sheet-prev"><thead><tr>' + g[0].map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -384,8 +386,33 @@
         csvBox.innerHTML = html + '</tbody></table></div>';
     }
 
+    /* ---------- curriculum table editor (the hidden textarea stays the form field, so saving and checking are unchanged) ---------- */
+    function toCsv(rows) {
+        var g = rows.map(function (r) { return r.slice(); });
+        while (g.length && !g[g.length - 1].some(function (c) { return String(c).trim() !== ''; })) g.pop();
+        if (!g.length) return '';
+        return g.map(function (r) {
+            return r.map(function (c) {
+                c = String(c == null ? '' : c);
+                return /[",\n\r]|^\s|\s$/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+            }).join(',');
+        }).join('\n') + '\n';
+    }
+    var gridHost = document.getElementById('csv-grid'), gridText = csvArea.value, grid = null;
+    ['input', 'change'].forEach(function (n) { gridHost.addEventListener(n, function (e) { e.stopPropagation(); }); });     // only real changes reach the form
+    if (window.FBGrid && FBGrid.inline) {
+        grid = FBGrid.inline(gridHost, normGrid(parseCsv(csvArea.value)), function (rows) {
+            gridText = toCsv(rows);
+            csvArea.value = gridText;
+            form.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+    function syncGrid() {                                  // the text changed from outside (an import): redraw the table
+        if (grid && csvArea.value !== gridText) { gridText = csvArea.value; grid.set(normGrid(parseCsv(csvArea.value))); }
+    }
+
     function markDirty() { dirty = true; savebar.classList.add('is-dirty'); }
-    function refresh() { renderJson(); renderCsv(); renderPrice(); }
+    function refresh() { syncGrid(); renderJson(); renderCsv(); renderPrice(); }
     form.addEventListener('input', function () { refresh(); markDirty(); });
     form.addEventListener('change', function () { refresh(); markDirty(); });
     form.addEventListener('submit', function () { dirty = false; });
