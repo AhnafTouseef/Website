@@ -1149,7 +1149,7 @@ BRAND_DEFAULTS = {
         "badge": "First Cohort · Python Programming",
         "headline": "Learn Skills That Actually Matter",
         "highlight": "Actually",
-        "text": ("We're two recent graduates who believe practical skills shouldn't cost a fortune or take years to acquire. "
+        "text": ("Practical, project-based courses at a fair price. "
                  "Join a cohort that teaches real-world Python for students ready to build projects and launch faster."),
         "primary_label": "Explore the Course",
         "secondary_label": "Meet your instructors",
@@ -1470,8 +1470,8 @@ SOCIALS = [
 CONTACT_DEFAULTS = {
     "email": "", "phone": "", "whatsapp": "", "address": "",
     "reply_time": "Usually within a few hours.",
-    "footer_text": "A learning platform built by graduates, for students. We're just getting started — and we're excited to grow with you.",
-    "footer_note": "Built with 💙 by two fresh grads",
+    "footer_text": "A learning platform for practical, project-based skills.",
+    "footer_note": "",
     "payment_method": "bKash", "payment_number": "", "payment_instructions": "",
     **{key: "" for key, *_ in SOCIALS},
 }

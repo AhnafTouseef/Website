@@ -6,7 +6,7 @@
 <section class="tm-hero">
     <div class="container">
         <span class="section-label">Our team</span>
-        <h1>We Built the Platform We Wish We Had</h1>
+        <h1>The People Behind {{ site_name }}</h1>
         <p class="tm-lead">Real people, with real profiles you can open: who they are, what they have studied and built, and how they teach.</p>
         <ul class="tm-facts">
             {% if people_count %}<li><b>{{ people_count }}</b> {{ 'instructor' if people_count == 1 else 'instructors' }}</li>{% endif %}
@@ -14,22 +14,6 @@
             <li>Cohort-based · project-focused</li>
         </ul>
     </div>
-</section>
-
-<section class="container tm-story">
-    <div>
-        <p>In 2023, we graduated with strong grades but not enough practical experience. University courses were full of theory, and we struggled to translate lectures into real code.</p>
-        <p>{{ site_name }} started because we wanted a different path: cohort-based learning, real projects, and mentors who answer questions in a way fellow students understand.</p>
-        <p>We built this platform for affordable, career-relevant study that fits modern student life — with clear steps, practical tools, and a supportive community.</p>
-    </div>
-    <aside class="tm-timeline" aria-label="Our story in short">
-        <h2>Our story in short</h2>
-        <ol>
-            <li><b>2023</b><span>We graduated with strong grades, but not enough practical experience.</span></li>
-            <li><b>Then</b><span>We went looking for a better way to learn: cohort-based, project-led, with mentors close to students.</span></li>
-            <li><b>2026</b><span>{{ site_name }} opens its founding batch.</span></li>
-        </ol>
-    </aside>
 </section>
 
 {% if founders %}
