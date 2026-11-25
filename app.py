@@ -203,14 +203,8 @@ if _pw_source in ("created", "memory"):
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg")
 
-pipeline_courses = [
-    {"title": "Data Analytics with Python", "estimate": "Est. Q4 2026", "icon": "📊"},
-    {"title": "Web Development (HTML/CSS/JS)", "estimate": "Est. Q4 2026", "icon": "🌐"},
-    {"title": "UI/UX Design Fundamentals", "estimate": "Est. Q4 2026", "icon": "🎨"},
-    {"title": "Digital Marketing & SEO", "estimate": "Est. 2027", "icon": "📣"},
-    {"title": "Excel & Google Sheets for Work", "estimate": "Est. 2027", "icon": "🧮"},
-    {"title": "Public Speaking & Communication", "estimate": "Est. 2027", "icon": "🎤"}
-]
+# Courses that are announced but not ready are normal course folders marked "coming soon" in the admin editor
+# (meta.json: "published": true, "coming_soon": true). There is no list of them in this file.
 
 # The general FAQ is content/faq/faq.csv (question,answer): edit it in the admin file browser or in Excel.
 # Messages sent through the form on the FAQ page are stored in content/faq/messages.json.
@@ -326,6 +320,13 @@ def _is_false(value):
 
 def _is_true(value):
     return value is True or _text(value).lower() in ("true", "yes", "1", "on")
+
+
+def _course_state(meta):
+    """'draft' (hidden), 'soon' (announced, not ready) or 'published' (open) for a course's meta.json."""
+    if _is_false(meta.get("published", True)):
+        return "draft"
+    return "soon" if _is_true(meta.get("coming_soon")) else "published"
 
 
 def _norm(name):
@@ -710,7 +711,16 @@ def _cell_filter(text):
 
 
 def load_courses():
-    """Every published course folder, sorted by 'order' then title."""
+    """Every published course folder, sorted by 'order' then title. Courses marked coming soon are not in here."""
+    return _load_courses(False)
+
+
+def load_coming_soon():
+    """The announced-but-not-ready courses (published true, coming_soon true), sorted by 'order' then title."""
+    return _load_courses(True)
+
+
+def _load_courses(soon):
     everyone = load_instructors(include_hidden=True)
     index = _instructor_index([p for p in everyone if p["published"]])
     hidden = _instructor_index([p for p in everyone if not p["published"]])
@@ -722,6 +732,8 @@ def load_courses():
         if meta is None:              # not a course folder, or broken JSON (already logged)
             continue
         if _is_false(meta.get("published", True)):
+            continue
+        if _is_true(meta.get("coming_soon")) != soon:
             continue
 
         team = []
@@ -761,7 +773,9 @@ def load_courses():
             "features": _text_list(meta.get("features")),
             "learn": _text_list(meta.get("what_you_will_learn")),
             "instructors": team,
-            "curriculum": _load_curriculum(os.path.join(path, "curriculum.csv")),
+            "curriculum": None if soon else _load_curriculum(os.path.join(path, "curriculum.csv")),
+            "icon": _text(meta.get("icon")),
+            "coming_soon": soon,
             "thumbnail": f"course/{folder}/{thumb}" if thumb else None,
             "thumb_style": meta.get("thumb_style"),
             "order": _int(meta.get("order")),
@@ -1010,11 +1024,11 @@ def _agenda(value):
 
 
 def _course_titles():
-    """{folder: title} of every published course (used to link webinars to courses)."""
+    """{folder: title} of every open (published, not coming soon) course; used to link webinars to courses."""
     titles = {}
     for folder in _subfolders(_courses_dir()):
         meta = _read_json_checked(os.path.join(_courses_dir(), folder, "meta.json"))[0]
-        if meta is not None and not _is_false(meta.get("published", True)):
+        if meta is not None and not _is_false(meta.get("published", True)) and not _is_true(meta.get("coming_soon")):
             titles[folder] = _text(meta.get("title")) or folder
     return titles
 
@@ -1594,18 +1608,75 @@ def home():
         founders=[p for p in people if p["founder"]],
         instructor_count=len(people),
         featured_courses=newest_courses(load_courses(), 2),
-        pipeline_courses=pipeline_courses,
+        coming_soon=load_coming_soon(),
         hero_webinars=webinars,
         show_banner=True
     )
 
-@app.route("/courses")
-def courses():
+def _courses_page(idea=None, status=200):
+    if idea is None:
+        idea = {k: "" for k in ("name", "email", "message")}
+        session["idea_ts"] = time.time()
     return render_template(
         "courses.html",
         courses=assign_tints(load_courses()),
-        pipeline_courses=pipeline_courses
-    )
+        coming_soon=load_coming_soon(),
+        idea=idea, idea_limit=IDEA_LIMIT, limits=MSG_LIMITS,
+    ), status
+
+
+@app.route("/courses")
+def courses():
+    return _courses_page()
+
+
+IDEA_LIMIT = 1000
+IDEA_THANKS = "Thank you! Your idea reached us. We read every one."
+
+
+@app.route("/suggest", methods=["POST"])
+def suggest_course():
+    """'What course would you like?' on the courses page. Stored in the messages inbox, marked as a course idea.
+    Only the idea itself is required; name and email are optional."""
+    idea = {k: request.form.get(k, "").strip() for k in ("name", "email", "message")}
+    if request.form.get("website", "").strip():              # the hidden "website" box: only a bot fills it in
+        flash(IDEA_THANKS, "success")
+        return redirect(url_for("courses", _anchor="suggest"))
+    ip = request.remote_addr or "?"
+    error = None
+    if not idea["message"]:
+        error = "Please tell us which course you would like."
+    elif len(idea["message"]) > IDEA_LIMIT:
+        error = f"Please keep your idea under {IDEA_LIMIT} characters."
+    elif len(idea["name"]) > MSG_LIMITS["name"] or len(idea["email"]) > MSG_LIMITS["email"]:
+        error = "Your name or email is too long."
+    elif idea["email"] and not EMAIL_RE.match(idea["email"]):
+        error = "That email address does not look right. Leave it empty if you prefer not to give one."
+    opened = session.get("idea_ts")
+    if not error and opened and time.time() - opened < MSG_MIN_SECONDS:
+        error = "That was very quick. Please check your idea and send it again."
+    if not error:
+        error = _contact_rate_error(ip)
+    row = None
+    if not error:
+        row = _build_message(idea)
+        row["kind"] = "idea"
+        try:
+            saved = add_message(row)
+        except OSError as exc:
+            log.error("Could not store a course idea (%s)", exc)
+            saved = False
+        if not saved:
+            error = "Sorry, we could not save your idea just now. Please try again later."
+    if error:
+        flash(error, "error")
+        return _courses_page(idea, 400)
+    _contact_rate_note(ip)
+    if not row["country"] and not row["city"] and _geo_enabled():
+        _track_enqueue({"kind": "message", "id": row["id"], "ip": row["ip"], "row": {}})
+    session.pop("idea_ts", None)
+    flash(IDEA_THANKS, "success")
+    return redirect(url_for("courses", _anchor="suggest"))
 
 # "/course" (no slug) opens the first course, so existing links and the header "Enroll Now" button keep working.
 @app.route("/course", defaults={"slug": None})
@@ -1620,6 +1691,8 @@ def course_details(slug):
     else:
         course = next((c for c in all_courses if c["slug"] == slug), None)
         if course is None:
+            if any(c["slug"] == slug for c in load_coming_soon()):     # announced, not open yet: no page of its own
+                return redirect(url_for("courses", _anchor="coming-soon"))
             abort(404)
     linked = webinars_for_course(course["slug"], load_webinars())
     return render_template("course_details.html", course=course, linked_webinar=(linked[0] if linked else None))
@@ -1687,7 +1760,7 @@ MSG_OLD_CSV = "messages.csv"      # the format before 2026-11; imported once int
 ENROLL_FILE = "enrollments.csv"
 MSG_COLUMNS = ["id", "received", "status", "name", "email", "message", "visitor_id", "ip", "country", "region",
                "city", "isp", "visitor_timezone", "device", "browser", "os", "language", "first_referrer",
-               "utm_source", "utm_medium", "utm_campaign", "landing_page", "user_agent"]
+               "utm_source", "utm_medium", "utm_campaign", "landing_page", "user_agent", "kind"]
 VISIT_COLUMNS = ["time", "visitor_id", "new_visitor", "ip", "country", "region", "city", "isp", "path", "referrer",
                  "utm_source", "utm_medium", "utm_campaign", "device", "browser", "os", "language"]
 ENROLL_COLUMNS = ["time", "visitor_id", "button", "ip", "country", "region", "city", "isp", "device", "browser", "os",
@@ -1893,6 +1966,7 @@ def _normalise_message(raw, position):
     for col in MSG_COLUMNS:
         row.setdefault(col, "")
     row["status"] = "done" if row["status"].strip().lower() == "done" else "new"
+    row["kind"] = "idea" if row["kind"].strip().lower() == "idea" else ""
     if not row["id"].strip():
         row["id"] = "r%08x" % zlib.crc32(json.dumps([position, raw], sort_keys=True, default=str).encode("utf-8"))
     row["_extra"] = extra
@@ -2447,9 +2521,9 @@ TRASH_INSTRUCTOR_PREFIX = "instructor--"      # course slugs never contain "--",
 TRASH_RE = re.compile(r"^(?P<slug>[^/\\\x00]+?)__(?P<ts>\d{8}-\d{6})(?:-\d+)?$")
 
 STRING_KEYS = ["title", "tagline", "subtitle", "description", "duration", "capacity",
-               "certificate", "price", "start_date", "enroll_link", "webinar_link", "payment_instructions"]
+               "certificate", "price", "start_date", "enroll_link", "webinar_link", "payment_instructions", "icon"]
 LIST_KEYS = ["features", "what_you_will_learn", "instructors"]
-META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published", "thumb_style"]
+META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published", "coming_soon", "thumb_style"]
 
 ADMIN_IDLE_SECONDS = 8 * 3600
 UPLOAD_LIMIT = 5 * 1024 * 1024
@@ -2759,9 +2833,13 @@ def scan_courses():
         if err:
             add("error", f"meta.json: {err}" + ("; this folder is ignored by the public site" if err == "file not found" else ""))
             meta = {}
-        status = "broken" if err else ("hidden" if _is_false(meta.get("published", True)) else "published")
+        state = "" if err else _course_state(meta)
+        status = "broken" if err else {"draft": "hidden", "soon": "soon", "published": "published"}[state]
+        soon = status == "soon"
         if status == "hidden":
             add("info", "hidden from the public site (published: false)")
+        if soon:
+            add("info", "coming soon: shown in the Coming Soon section, no page and no Enroll button until you publish it")
 
         if not err:
             unknown = [k for k in meta if k not in META_KEYS]
@@ -2773,13 +2851,13 @@ def scan_courses():
                 add("info", "unknown key(s) in meta.json are ignored by the site: " + ", ".join(hints))
             if not _text(meta.get("title")):
                 add("warn", "no title; the folder name is used instead")
-            if not _text(meta.get("enroll_link")):
+            if not _text(meta.get("enroll_link")) and not soon:
                 add("warn", "no enroll_link; the Enroll buttons are hidden")
             for key in ("enroll_link", "webinar_link"):
                 value = _text(meta.get(key))
                 if value and not URL_RE.match(value):
                     add("warn", f"{key} is not an http(s) URL: {value}")
-            if not _text(meta.get("price")):
+            if not _text(meta.get("price")) and not soon:
                 add("info", "no price set")
             _, _, discount_problem = _discount_info(meta)
             if discount_problem:
@@ -2795,13 +2873,15 @@ def scan_courses():
                 add("warn", "'order' should be a whole number")
             if "published" in meta and not isinstance(meta["published"], bool):
                 add("warn", "'published' should be true or false (no quotes)")
-            if not _text_list(meta.get("features")):
+            if "coming_soon" in meta and not isinstance(meta["coming_soon"], bool):
+                add("warn", "'coming_soon' should be true or false (no quotes)")
+            if not _text_list(meta.get("features")) and not soon:
                 add("info", "no features (price box will be empty)")
-            if not _text_list(meta.get("what_you_will_learn")):
+            if not _text_list(meta.get("what_you_will_learn")) and not soon:
                 add("info", "no what_you_will_learn items (that section is hidden)")
 
         names = _text_list(meta.get("instructors")) if not err else []
-        if not err and not names:
+        if not err and not names and not soon:
             add("info", "no instructors listed")
         for name in names:
             if index.get(_norm(name)) is None:
@@ -2811,20 +2891,21 @@ def scan_courses():
         csv_text = _read_text(csv_path)
         rows = cols = 0
         if csv_text is None:
-            add("warn" if not os.path.isfile(csv_path) else "error",
-                "curriculum.csv not found" if not os.path.isfile(csv_path) else "curriculum.csv is not readable as UTF-8")
+            if os.path.isfile(csv_path) or not soon:
+                add("warn" if not os.path.isfile(csv_path) else "error",
+                    "curriculum.csv not found" if not os.path.isfile(csv_path) else "curriculum.csv is not readable as UTF-8")
         else:
             try:
                 sheet = parse_sheet(csv.reader(io.StringIO(csv_text, newline="")))
                 if sheet:
                     rows, cols = sheet["nrows"], sheet["ncols"]
-                else:
+                elif not soon:
                     add("warn", "curriculum.csv is empty (the Curriculum section is hidden)")
             except csv.Error as exc:
                 add("error", f"curriculum.csv: {exc}")
 
         thumb = _find_image(path, "thumbnail")
-        if not thumb:
+        if not thumb and not soon:
             add("warn", "no thumbnail image (thumbnail.jpg / .png / .webp)")
 
         files = []
@@ -2848,6 +2929,7 @@ def scan_courses():
             "title": _text(meta.get("title")) or folder,
             "enrollments": _count_log(os.path.join(path, ENROLL_FILE)),
             "tagline": _text(meta.get("tagline")),
+            "icon": _text(meta.get("icon")) if not err else "",
             "price": _text(meta.get("price")),
             "price_final": final_price,
             "discount": discount_label,
@@ -2993,10 +3075,11 @@ def dashboard():
     stats = {
         "total": len(courses_),
         "published": sum(1 for c in courses_ if c["status"] == "published"),
+        "soon": sum(1 for c in courses_ if c["status"] == "soon"),
         "hidden": sum(1 for c in courses_ if c["status"] == "hidden"),
         "broken": sum(1 for c in courses_ if c["status"] == "broken"),
         "rows": sum(c["rows"] for c in courses_),
-        "no_thumb": sum(1 for c in courses_ if c["status"] != "broken" and not c["thumb"]),
+        "no_thumb": sum(1 for c in courses_ if c["status"] not in ("broken", "soon") and not c["thumb"]),
         "instructors": len(instructors),
         "bytes": sum(c["size"] for c in courses_),
         "errors": sum(c["n_error"] for c in courses_),
@@ -3477,10 +3560,10 @@ def _audience(rows, unique=False):
 def messages():
     rows = read_messages()
     show = request.args.get("show", "all")
-    if show not in ("all", "new", "done"):
+    if show not in ("all", "new", "done", "idea"):
         show = "all"
     q = request.args.get("q", "").strip()[:100]
-    shown = [r for r in rows if show == "all" or r["status"] == show]
+    shown = [r for r in rows if show == "all" or (r["kind"] == "idea" if show == "idea" else r["status"] == show)]
     if q:
         needle = q.lower()
         shown = [r for r in shown if any(needle in (r[c] or "").lower() for c in
@@ -3489,6 +3572,7 @@ def messages():
     week = (now_bd() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     stats = {"total": len(rows), "new": sum(1 for r in rows if r["status"] == "new"),
              "done": sum(1 for r in rows if r["status"] == "done"),
+             "ideas": sum(1 for r in rows if r["kind"] == "idea"),
              "week": sum(1 for r in rows if r["received"] >= week)}
     wanted = {m["visitor_id"] for m in shown if m["visitor_id"]}
     history = {}
@@ -3688,7 +3772,7 @@ def system():
     return render_template("admin_system.html", info=info, routes=routes, logos=logos, clock=TIME.status(),
                            brand_logo=load_branding()["header"]["file"],
                            logs=_logbook.recent(), instructors=load_instructors(include_hidden=True),
-                           pipeline_count=len(pipeline_courses), faq_count=len(load_faq()), message_count=len(read_messages()))
+                           soon_count=len(load_coming_soon()), faq_count=len(load_faq()), message_count=len(read_messages()))
 
 
 # ---------- routes: create / edit course ----------
@@ -3704,7 +3788,7 @@ def _form_from_meta(meta, csv_text, slug, added=""):
         "what_you_will_learn": "\n".join(_text_list(meta.get("what_you_will_learn"))),
         "instructors": _text_list(meta.get("instructors")),
         "order": str(meta.get("order", "")) if isinstance(meta.get("order", ""), int) else _text(meta.get("order")),
-        "published": not _is_false(meta.get("published", True)) if meta else False,
+        "status": _course_state(meta) if meta else "draft",
         "csv": csv_text,
         "thumb_style": clean_img_style(meta.get("thumb_style"), "thumb"),
     }
@@ -3727,7 +3811,7 @@ def _read_submission(creating, existing_meta, added_default):
         "what_you_will_learn": f.get("what_you_will_learn", ""),
         "instructors": [n.strip() for n in f.getlist("instructors") if n.strip()],
         "order": f.get("order", "").strip(),
-        "published": f.get("published") == "on",
+        "status": f.get("status", "draft") if f.get("status") in ("draft", "soon", "published") else "draft",
         "csv": f.get("curriculum_csv", ""),
     }
     form["thumb_style"] = read_img_style(f, "thumb", "thumb", errors, "Thumbnail")
@@ -3798,7 +3882,11 @@ def _read_submission(creating, existing_meta, added_default):
         meta["discount"] = d100 // 100 if d100 % 100 == 0 else float(Decimal(d100) / 100)
     else:
         meta.pop("discount", None)
-    meta["published"] = form["published"]
+    meta["published"] = form["status"] != "draft"
+    if form["status"] == "soon":
+        meta["coming_soon"] = True
+    else:
+        meta.pop("coming_soon", None)
     store_img_style(meta, "thumb_style", form["thumb_style"], "thumb")
     return form, {
         "slug": form["slug"],
@@ -3848,9 +3936,13 @@ def _editor(slug):
                 _remove_thumbnails(target_path)
             log.info("admin: %s course '%s'", "created" if creating else "saved", target)
             if creating:
-                flash(f"Created '{target}' as a draft. Tick 'published' when it is ready.", "success")
+                flash(f"Created '{target}' as " + {"draft": "a draft. Set its status to Coming soon or Published when you want visitors to see it.",
+                                                  "soon": "a coming-soon course. It shows in the Coming Soon section.",
+                                                  "published": "a published course."}[_course_state(result["meta"])], "success")
             else:
-                flash(f"Saved '{target}'. The public site already shows the new version.", "success")
+                flash(f"Saved '{target}'. " + {"draft": "It is hidden from the public site.",
+                                                "soon": "It shows in the Coming Soon section.",
+                                                "published": "The public site already shows the new version."}[_course_state(result["meta"])], "success")
             return redirect(url_for("admin.course_edit", slug=target))
         status = 400
     else:
@@ -3858,7 +3950,7 @@ def _editor(slug):
         if creating:
             taken = [e["order"] for e in scan_courses() if e["order"] is not None]
             form = _form_from_meta({"order": (max(taken) + 1) if taken else 1, "published": False}, csv_text, "", added_default)
-            form["published"] = False
+            form["status"] = "draft"
         else:
             form = _form_from_meta(existing_meta, csv_text, slug, added_default)
 
@@ -3869,7 +3961,7 @@ def _editor(slug):
         creating=creating, slug=slug, form=form, errors=errors, load_error=load_error,
         instructors=instructors, extra_instructors=extra,
         thumb=(f"course/{slug}/{thumb}" if thumb else None),
-        public_visible=(not creating and not load_error and form["published"]),
+        public_visible=(not creating and not load_error and form["status"] == "published"),
     ), status
 
 
@@ -3998,11 +4090,13 @@ def course_toggle(slug):
     if meta is None:
         flash(f"Cannot change '{slug}': meta.json {err}. Open it in the editor to repair it.", "error")
     else:
-        now_published = _is_false(meta.get("published", True))
+        was = _course_state(meta)
+        now_published = was != "published"          # hidden and coming soon both become open; an open course is hidden
         if not _valid_date(_text(meta.get("added"))):
             # pin the date before rewriting the file, so a publish/hide click can't make an old course look new
             meta["added"] = _added_info(meta, os.path.join(path, "meta.json"))[1]
         meta["published"] = now_published
+        meta.pop("coming_soon", None)
         _atomic_write(os.path.join(path, "meta.json"), _dump_meta(meta))
         log.info("admin: '%s' is now %s", slug, "published" if now_published else "hidden")
         flash(f"'{slug}' is now {'published' if now_published else 'hidden'}.", "success")
@@ -6248,7 +6342,54 @@ def transfer_import_apply(token):
 
 
 
+# ---------------------------------------------------------------------------
+# One-time seed: the six "coming soon" cards that used to be typed into this file become real coming-soon
+# course folders, so they can be edited or deleted in the admin. Runs once (content/site/coming-soon-seeded.txt
+# is the marker; it is safe to delete the marker, only missing folders are created).
+# ---------------------------------------------------------------------------
+
+_COMING_SOON_SEED = [
+    ("Data Analytics with Python", "Est. Q4 2026", "\U0001F4CA"),
+    ("Web Development (HTML/CSS/JS)", "Est. Q4 2026", "\U0001F310"),
+    ("UI/UX Design Fundamentals", "Est. Q4 2026", "\U0001F3A8"),
+    ("Digital Marketing & SEO", "Est. 2027", "\U0001F4E3"),
+    ("Excel & Google Sheets for Work", "Est. 2027", "\U0001F9EE"),
+    ("Public Speaking & Communication", "Est. 2027", "\U0001F3A4"),
+]
+SOON_MARKER = "coming-soon-seeded.txt"
+
+
+def _seed_coming_soon():
+    marker = os.path.join(CONTENT_DIR, "site", SOON_MARKER)
+    try:
+        with _data_lock():
+            if os.path.exists(marker):
+                return
+            root = _courses_dir()
+            existing = set(_subfolders(root)) if os.path.isdir(root) else set()
+            today = datetime.now().strftime("%Y-%m-%d")
+            made = 0
+            for i, (title, when, icon) in enumerate(_COMING_SOON_SEED, start=1):
+                slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+                if slug in existing:
+                    continue
+                os.makedirs(os.path.join(root, slug))
+                _atomic_write(os.path.join(root, slug, "meta.json"), _dump_meta({
+                    "title": title, "start_date": when, "icon": icon, "order": i, "added": today,
+                    "published": True, "coming_soon": True,
+                }))
+                made += 1
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            _atomic_write(marker, "The coming-soon placeholder courses were created once from the old built-in list.\n"
+                                  "They are normal course folders now: edit or delete them in the admin. This file is only a marker.\n")
+            if made:
+                log.info("content/course: created %d coming-soon placeholder course(s)", made)
+    except OSError as exc:
+        log.warning("Could not create the coming-soon placeholder courses (%s)", exc)
+
+
 app.register_blueprint(admin_bp)
+_seed_coming_soon()
 
 
 if __name__ == "__main__":

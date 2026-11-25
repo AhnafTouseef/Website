@@ -1,0 +1,15 @@
+{# One "coming soon" card. Include inside a loop that sets `course` (a course marked coming soon in the admin). #}
+{% set ts = imgstyle(course.thumb_style, 'thumb') %}
+<div class="pipeline-card pipeline-small soon-card">
+    {% if course.thumbnail %}
+    <div class="thumb-frame soon-thumb"{% if ts.frame %} style="{{ ts.frame }}"{% endif %}>
+        <img src="{{ url_for('media', filename=course.thumbnail) }}" alt="" loading="lazy"{% if ts.img %} style="{{ ts.img }}"{% endif %}>
+    </div>
+    {% elif course.icon %}
+    <div class="pipeline-icon" aria-hidden="true">{{ course.icon }}</div>
+    {% endif %}
+    <span class="pill-tag">Coming Soon</span>
+    <h4>{{ course.title }}</h4>
+    {% if course.subtitle %}<p class="soon-sub">{{ course.subtitle }}</p>{% endif %}
+    {% if course.start_date %}<p class="soon-when">{{ course.start_date }}</p>{% endif %}
+</div>

@@ -24,6 +24,15 @@
 <div class="split">
     <div>
         <section class="panel">
+            <header><b>status</b></header>
+            <div class="body status-pick">
+                <label class="chk"><input type="radio" name="status" value="draft" {% if form.status == 'draft' %}checked{% endif %}> <b>draft</b> <span class="sub">— hidden from the public site</span></label>
+                <label class="chk"><input type="radio" name="status" value="soon" {% if form.status == 'soon' %}checked{% endif %}> <b>coming soon</b> <span class="sub">— visitors see it in the “Coming Soon” section (title, short text, expected date and picture or emoji). No course page, no Enroll button. Everything else can stay empty.</span></label>
+                <label class="chk"><input type="radio" name="status" value="published" {% if form.status == 'published' %}checked{% endif %}> <b>published</b> <span class="sub">— open for enrollment, with its own page</span></label>
+            </div>
+        </section>
+
+        <section class="panel">
             <header><b>identity</b></header>
             <div class="body f-grid">
                 <div class="field span2">
@@ -47,6 +56,12 @@
                 <div class="field">
                     <label class="l" for="f-subtitle">subtitle <code>subtitle</code></label>
                     <input id="f-subtitle" type="text" name="subtitle" value="{{ form.subtitle }}" placeholder="one line shown on course cards">
+                    <div class="help">also the short text on a Coming Soon card.</div>
+                </div>
+                <div class="field">
+                    <label class="l" for="f-icon">emoji <code>icon</code> <span class="opt">optional</span></label>
+                    <input id="f-icon" type="text" name="icon" value="{{ form.icon }}" maxlength="8" placeholder="📊">
+                    <div class="help">shown on the Coming Soon card when the course has no picture.</div>
                 </div>
                 <div class="field span2">
                     <label class="l" for="f-description">description <code>description</code></label>
@@ -78,6 +93,7 @@
                 <div class="field">
                     <label class="l" for="f-start">start date <code>start_date</code></label>
                     <input id="f-start" type="text" name="start_date" value="{{ form.start_date }}" placeholder="January 10, 2027">
+                    <div class="help">for a coming-soon course, write the expected time, e.g. “Est. Q1 2027”.</div>
                 </div>
                 <div class="field"></div>
                 <div class="field span2">
@@ -199,12 +215,6 @@
             </div>
         </section>
 
-        <section class="panel">
-            <header><b>visibility</b></header>
-            <div class="body">
-                <label class="chk"><input type="checkbox" name="published" {% if form.published %}checked{% endif %}> <b>published</b> <span class="sub">— unticked = hidden from the public site (saved as a draft)</span></label>
-            </div>
-        </section>
 
         <div class="savebar" id="savebar">
             <button class="a-btn primary" type="submit">{{ 'create course' if creating else 'save changes' }}</button>
@@ -325,7 +335,7 @@
         var meta = {
             title: val('title'), tagline: val('tagline'), subtitle: val('subtitle'), description: val('description'),
             duration: val('duration'), capacity: val('capacity'), certificate: val('certificate'),
-            price: val('price'), start_date: val('start_date'),
+            price: val('price'), start_date: val('start_date'), icon: val('icon'),
             enroll_link: val('enroll_link'), webinar_link: val('webinar_link'),
             features: lines('features'), what_you_will_learn: lines('what_you_will_learn'),
             instructors: Array.prototype.slice.call(form.querySelectorAll('input[name=instructors]:checked')).map(function (c) { return c.value; })
@@ -334,7 +344,9 @@
         if (st.d100) meta.discount = st.d100 / 100;
         meta.order = isNaN(order) ? 100 : order;
         meta.added = val('added');
-        meta.published = !!form.elements['published'].checked;
+        var stat = form.querySelector('input[name=status]:checked'), sv = stat ? stat.value : 'draft';
+        meta.published = sv !== 'draft';
+        if (sv === 'soon') meta.coming_soon = true;
         var ts = window.imgStyleDiff && window.imgStyleDiff('thumb');
         if (ts) meta.thumb_style = ts;
         jsonBox.innerHTML = highlight(JSON.stringify(meta, null, 4));

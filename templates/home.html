@@ -105,21 +105,20 @@
 </section>
 {% endif %}
 
-<section class="container pipeline-section">
+{% if coming_soon %}
+<section class="container pipeline-section" id="coming-soon">
     <div class="section-header center">
         <h2>More Courses Are Coming</h2>
         <p>We are building a full pipeline of student-friendly programs designed to grow with your interests.</p>
     </div>
     <div class="pipeline-grid">
-        {% for course in pipeline_courses[:4] %}
-        <div class="pipeline-card">
-            <span class="pill-tag">Coming Soon</span>
-            <h4>{{ course.title }}</h4>
-        </div>
+        {% for course in coming_soon[:4] %}
+        {% include "_soon_card.html" %}
         {% endfor %}
     </div>
-    <p class="micro-copy">Want to suggest a course topic? Let us know →</p>
+    <p class="micro-copy">Want to suggest a course topic? <a href="{{ url_for('courses', _anchor='suggest') }}">Let us know →</a></p>
 </section>
+{% endif %}
 
 {% if hero_webinars %}
 {% set nw = hero_webinars[0] %}

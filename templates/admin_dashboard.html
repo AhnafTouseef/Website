@@ -11,6 +11,7 @@
 
 <div class="tiles">
     <div class="tile ok"><div class="k">published</div><div class="v">{{ stats.published }}</div></div>
+    <div class="tile"><div class="k">coming soon</div><div class="v">{{ stats.soon }}</div></div>
     <div class="tile {{ 'warn' if stats.hidden }}"><div class="k">hidden</div><div class="v">{{ stats.hidden }}</div></div>
     <div class="tile {{ 'bad' if stats.broken else 'ok' }}"><div class="k">broken</div><div class="v">{{ stats.broken }}</div></div>
     <div class="tile"><div class="k">curriculum rows</div><div class="v">{{ stats.rows }}</div></div>
@@ -36,14 +37,14 @@
             <tr class="row">
                 <td>
                     {% if c.thumb %}<img class="thumb" src="{{ url_for('media', filename=c.thumb) }}?v={{ c.mtime|int }}" alt="">
-                    {% else %}<div class="thumb none">no img</div>{% endif %}
+                    {% else %}<div class="thumb none">{{ c.icon or 'no img' }}</div>{% endif %}
                 </td>
                 <td>
                     <div class="cell-title">{{ c.title }}</div>
                     <div class="cell-slug">/course/{{ c.slug }}</div>
                     <details class="dd" style="margin-top:.3rem"><summary>inspect</summary></details>
                 </td>
-                <td><span class="chip {{ c.status }}">{{ c.status }}</span></td>
+                <td><span class="chip {{ c.status }}">{{ 'coming soon' if c.status == 'soon' else c.status }}</span></td>
                 <td class="num">{{ c.order if c.order is not none else '—' }}</td>
                 <td class="nowrap mono-sm">{{ c.added or '—' }}</td>
                 <td class="nowrap">{% if c.discount %}<span class="sale-old">{{ c.price }}</span><span class="sale-new">{{ c.price_final }}</span><span class="sale-tag">{{ c.discount }}% OFF</span>{% else %}{{ c.price or '—' }}{% endif %}</td>

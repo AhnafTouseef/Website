@@ -3,7 +3,7 @@
 {% block content %}
 <div class="a-title">
     <h1>messages</h1>
-    <span class="sub">sent through the form on the FAQ page · stored in content/faq/messages.json</span>
+    <span class="sub">sent through the form on the FAQ page, and course ideas from the Courses page · stored in content/faq/messages.json</span>
     <div class="right">
         {% if exists %}<a class="a-btn" href="{{ url_for('admin.messages_download') }}">download .csv</a>{% endif %}
     </div>
@@ -16,6 +16,7 @@
 <div class="tiles">
     <div class="tile {{ 'warn' if stats.new else 'ok' }}"><div class="k">new</div><div class="v">{{ stats.new }}</div></div>
     <div class="tile"><div class="k">read</div><div class="v">{{ stats.done }}</div></div>
+    <div class="tile"><div class="k">course ideas</div><div class="v">{{ stats.ideas }}</div></div>
     <div class="tile"><div class="k">last 7 days</div><div class="v">{{ stats.week }}</div></div>
     <div class="tile"><div class="k">all time</div><div class="v">{{ stats.total }}</div></div>
 </div>
@@ -42,7 +43,7 @@
         <div class="right">
             <form class="inline msg-filter" method="get" action="{{ url_for('admin.messages') }}">
                 <select name="show" onchange="this.form.submit()">
-                    {% for v, label in (('all', 'all'), ('new', 'new only'), ('done', 'read only')) %}
+                    {% for v, label in (('all', 'all'), ('new', 'new only'), ('done', 'read only'), ('idea', 'course ideas')) %}
                     <option value="{{ v }}" {{ 'selected' if show == v }}>{{ label }}</option>
                     {% endfor %}
                 </select>
@@ -56,19 +57,20 @@
     {% for m in messages %}
     <button type="button" class="mrow {{ m.status }}" data-open="m-{{ m.id }}" title="Open this message">
         <span class="mrow-dot" aria-hidden="true"></span>
-        <span class="mrow-from">{{ m.name }}</span>
-        <span class="mrow-text">{{ m.message|replace('\n', ' ') }}</span>
+        <span class="mrow-from">{{ m.name or 'anonymous' }}</span>
+        <span class="mrow-text">{% if m.kind == 'idea' %}<span class="idea-tag">course idea</span>{% endif %}{{ m.message|replace('\n', ' ') }}</span>
         <span class="mrow-when">{{ when(m.received) }}</span>
     </button>
     {% endfor %}
     </div>
     {% for m in messages %}
-    <dialog class="mdlg" id="m-{{ m.id }}" aria-label="Message from {{ m.name }}">
+    <dialog class="mdlg" id="m-{{ m.id }}" aria-label="Message from {{ m.name or 'anonymous' }}">
         <header class="mdlg-head">
             <div>
-                <b class="mdlg-name">{{ m.name }}</b>
+                <b class="mdlg-name">{{ m.name or 'anonymous' }}</b>
+                {% if m.kind == 'idea' %}<span class="chip upcoming">course idea</span>{% endif %}
                 <span class="chip {{ 'draft' if m.status == 'new' else 'published' }}" data-state>{{ 'new' if m.status == 'new' else 'read' }}</span>
-                <div class="mdlg-line"><a href="mailto:{{ m.email }}">{{ m.email }}</a> · <span class="mono-sm">{{ m.received }}</span></div>
+                <div class="mdlg-line">{% if m.email %}<a href="mailto:{{ m.email }}">{{ m.email }}</a>{% else %}<span class="dim">no email left</span>{% endif %} · <span class="mono-sm">{{ m.received }}</span></div>
             </div>
             <button type="button" class="a-btn small" data-close aria-label="Close">close ✕</button>
         </header>
@@ -98,14 +100,14 @@
             </details>
         </div>
         <footer class="mdlg-foot">
-            <a class="a-btn small" href="mailto:{{ m.email }}?subject={{ ('Re: your message to ' ~ site_name)|urlencode }}">reply by email</a>
+            {% if m.email %}<a class="a-btn small" href="mailto:{{ m.email }}?subject={{ ('Re: your message to ' ~ site_name)|urlencode }}">reply by email</a>{% endif %}
             <form class="inline" method="post" action="{{ url_for('admin.message_status', msg_id=m.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="status" value="{{ 'new' if m.status == 'done' else 'done' }}" data-flip>
                 <input type="hidden" name="back" value="{{ request.full_path.rstrip('?') }}">
                 <button class="a-btn small" type="submit" data-flip-label>{{ 'mark as unread' if m.status == 'done' else 'mark as read' }}</button>
             </form>
-            <form class="inline" method="post" action="{{ url_for('admin.message_delete', msg_id=m.id) }}" data-confirm="Move this message from {{ m.name }} to the trash?">
+            <form class="inline" method="post" action="{{ url_for('admin.message_delete', msg_id=m.id) }}" data-confirm="Move this message from {{ m.name or 'anonymous' }} to the trash?">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="a-btn small danger" type="submit">delete</button>
             </form>

@@ -647,3 +647,9 @@ th.sortable[aria-sort="descending"]::after { content: " \25BE"; opacity: 1; }
 .gx-inline .gx-msg { display: none; }
 #csv-grid { min-width: 0; }
 .gx.gx-inline { min-width: 0; max-width: 100%; }
+
+/* course status choice + course-idea tag in the inbox */
+.status-pick { display: grid; gap: 0.55rem; }
+.status-pick .chk { display: flex; align-items: baseline; gap: 0.5rem; }
+.chip.soon { color: #c4b5fd; border-color: #4b3b86; background: #1d1735; }
+.idea-tag { display: inline-block; margin-right: 0.5rem; padding: 0 0.4rem; border: 1px solid #4b3b86; color: #c4b5fd; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }

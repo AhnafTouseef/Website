@@ -20,23 +20,38 @@
         {% endfor %}
     </div>
     {% else %}
-    <p class="subtle">No courses are open for enrollment right now. Have a look at what's coming below.</p>
+    <p class="subtle">No courses are open for enrollment right now.{% if coming_soon %} Have a look at what's coming below.{% endif %}</p>
     {% endif %}
 </section>
 
-<section class="container pipeline-section">
+{% if coming_soon %}
+<section class="container pipeline-section" id="coming-soon">
     <div class="section-header center">
-        <h2>In The Pipeline</h2>
-        <p>Upcoming learning tracks with release windows so you can plan your next step.</p>
+        <h2>Coming Soon</h2>
+        <p>Courses we are preparing. They are not open for enrollment yet, so plan your next step and tell us what you would like to see.</p>
     </div>
     <div class="pipeline-grid pipeline-grid-3">
-        {% for item in pipeline_courses %}
-        <div class="pipeline-card pipeline-small">
-            <div class="pipeline-icon">{{ item.icon }}</div>
-            <h4>{{ item.title }}</h4>
-            <p>{{ item.estimate }}</p>
-        </div>
+        {% for course in coming_soon %}
+        {% include "_soon_card.html" %}
         {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="container suggest-section" id="suggest">
+    <div class="suggest-card">
+        <h2>What course would you like us to make?</h2>
+        <p>Tell us a topic, a skill or a problem you want to learn to solve. We read every idea and use them to decide what comes next.</p>
+        <form method="post" action="{{ url_for('suggest_course') }}" class="form-card" id="idea-form">
+            <label>Your idea<textarea name="message" rows="4" maxlength="{{ idea_limit }}" placeholder="For example: Python for accounting, basic electronics, English speaking practice…" required>{{ idea.message }}</textarea></label>
+            <div class="suggest-who">
+                <label>Name <span class="opt">(optional)</span><input type="text" name="name" value="{{ idea.name }}" maxlength="{{ limits.name }}" placeholder="Name"></label>
+                <label>Email <span class="opt">(optional, only if you want a reply)</span><input type="email" name="email" value="{{ idea.email }}" maxlength="{{ limits.email }}" placeholder="Email"></label>
+            </div>
+            <div class="hp-field" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+            <button type="submit" class="button button-primary">💡 Send my idea</button>
+            <p class="form-privacy">With your idea we save your IP address and the approximate place it points to, your device and browser, and the page that brought you here, to understand which students we reach and to prevent spam. It is never shown publicly.</p>
+        </form>
     </div>
 </section>
 {% endblock %}

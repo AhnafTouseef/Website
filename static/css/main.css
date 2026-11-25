@@ -2058,3 +2058,22 @@ span.px > img.px-img {
 .pay-copy { flex: none; border: 0; border-radius: 999px; padding: 0.4rem 0.9rem; background: #141753; color: #ffffff; font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
 .pay-copy.copied { background: #15803d; }
 .pay-box p { margin: 0.45rem 0 0; color: #44403c; font-size: 0.9rem; line-height: 1.55; }
+
+/* ---------- coming-soon cards and the course-idea box ---------- */
+.soon-card { display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; }
+.section-header.center h2, .section-header.center p { margin-left: auto; margin-right: auto; }
+.pipeline-icon { font-size: 1.9rem; line-height: 1; }
+.soon-card .pill-tag { margin-top: 0.3rem; padding: 0.28rem 0.7rem; font-size: 0.74rem; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(245, 158, 11, 0.16); color: #8a5a00; }
+.soon-card h4 { margin: 0.6rem 0 0.2rem; }
+.soon-thumb { border-radius: 1rem; margin-bottom: 0.4rem; }
+.soon-sub { margin: 0; }
+.soon-when { margin: 0.35rem 0 0; font-weight: 600; color: var(--nav-strong, #1b1f69); }
+.micro-copy a { font-weight: 600; text-decoration: underline; }
+
+.suggest-section { padding-block: 1rem 3rem; }
+.suggest-card { max-width: 46rem; margin-inline: auto; padding: 1.6rem; border-radius: 1.5rem; border: 1px solid var(--border); background: #ffffff; }
+.suggest-card h2 { margin: 0 0 0.4rem; }
+.suggest-card > p { margin: 0 0 1.1rem; color: var(--muted); }
+.suggest-who { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
+.suggest-who .opt { font-weight: 400; color: var(--muted); font-size: 0.88em; }
+@media (max-width: 640px) { .suggest-who { grid-template-columns: 1fr; } .suggest-card { padding: 1.1rem; } }
