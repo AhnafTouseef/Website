@@ -277,6 +277,8 @@ A developer-style control panel for courses. It is not linked from the public si
 - Password: on first start a random password is generated, saved in `admin_password.txt` and printed once in the terminal. To choose your own, set the `ADMIN_PASSWORD` environment variable or edit that file.
 - `secret_key.txt` (session signing key) is generated the same way, or set `SECRET_KEY`. Keep both files private; `.gitignore` already excludes them.
 
+Layout: the top row holds the console name, the session time, *view site* and *logout*. The section tabs sit in their own second row, each with an icon (inline SVG in `templates/admin_base.html`, no icon files or libraries), and that row stays pinned while the page scrolls. On a phone the tabs stack icon over label and the row scrolls sideways, starting at the current tab.
+
 What it does:
 
 | Page | Purpose |
