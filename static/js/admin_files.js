@@ -16,7 +16,7 @@
     var menuEl = $('#fb-menu'), toastsEl = $('#fb-toasts');
 
     var state = {
-        cwd: '', entries: [], search: '', sel: [], anchor: null, clip: null, protectedDir: false,
+        cwd: '', entries: [], search: '', sel: [], anchor: null, clip: null,
         view: store('fb-view') === 'grid' ? 'grid' : 'list',
         sort: store('fb-sort') || 'name', desc: store('fb-desc') === '1', loadId: 0, truncated: false
     };
@@ -171,7 +171,6 @@
                 return;
             }
             state.entries = d.entries;
-            state.protectedDir = d.protected;
             state.truncated = d.truncated;
             if (keepSel) {
                 var have = {};
@@ -304,7 +303,6 @@
                 tr.appendChild(el('td', 'dim', e.dir ? 'folder' : (e.ext || '').replace('.', '') || 'file'));
                 if (state.search) tr.appendChild(el('td', 'dim', '/' + (e.where || '')));
                 if (e.dir) tr.dataset.dir = '1';
-                if (e.allowed === false) { tr.classList.add('fb-dim'); tr.title = 'This type is not allowed on the site'; }
                 body.appendChild(tr);
             });
             table.appendChild(body);
@@ -362,7 +360,6 @@
             else if (need === 'one') ok = one;
             else if (need === 'zip') ok = zip;
             else if (need === 'clip') ok = !!state.clip && !state.search;
-            if ((b.dataset.act === 'rename' || b.dataset.act === 'delete' || b.dataset.act === 'cut') && sel.some(function (e) { return e.dir && isCore(e.path); })) ok = false;
             b.disabled = !ok;
         });
         var nonRoot = !state.search;
@@ -371,7 +368,6 @@
             if (b) b.disabled = !nonRoot;
         });
     }
-    function isCore(p) { return ['course', 'instructors', 'webinars', 'images', 'logo'].indexOf(p) >= 0; }
 
     /* ---------- selection ---------- */
 
@@ -545,7 +541,10 @@
     var editing = null;
     function editor(e) {
         api('text?path=' + enc(e.path)).then(function (d) {
-            if (!d.ok) { toast(d.error, 'error'); return; }
+            if (!d.ok) {
+                if (d._status === 415 || /not text/.test(d.error || '')) { download([e]); return; }       // a binary file: hand it over like a computer would
+                toast(d.error, 'error'); return;
+            }
             editing = { path: e.path, mtime: d.mtime, clean: d.text };
             $('#fb-edit-name').textContent = 'content/' + e.path;
             etext.value = d.text;
@@ -567,6 +566,7 @@
             if (d.ok) {
                 editing.clean = etext.value; editing.mtime = d.mtime;
                 estate.textContent = 'saved ✓';
+                if (d.warn) emsg.textContent = d.warn;
                 return true;
             }
             if (d.changed) {
@@ -625,7 +625,7 @@
         });
     }
     function newfile() {
-        modal({ title: 'New text file (.txt .md .csv .json)', input: { value: 'notes.txt', selectStem: true },
+        modal({ title: 'New file (any name, any type; it starts empty)', input: { value: 'notes.txt', selectStem: true },
             buttons: [{ label: 'create', value: 'ok', cls: 'primary' }, { label: 'cancel', value: null }] }).then(function (r) {
             if (!r.value) return;
             api('newfile', { json: { path: state.cwd, name: r.text } }).then(function (d) {
@@ -801,11 +801,10 @@
         if (item && state.sel.indexOf(item.dataset.path) < 0) select([item.dataset.path], item.dataset.path);
         if (!item) select([], null);
         var sel = selected(), one = sel.length === 1 ? sel[0] : null;
-        var core = sel.some(function (x) { return x.dir && isCore(x.path); });
         var items = [];
         if (sel.length) {
             if (one) items.push({ label: one.dir ? 'open' : (one.grid || one.text ? 'edit' : 'open / preview'), run: function () { openEntry(one); } });
-            if (one && one.grid && one.text) items.push({ label: 'edit as text', run: function () { editor(one); } });
+            if (one && one.text && (one.grid || one.kind === 'image')) items.push({ label: 'edit as text', run: function () { editor(one); } });
             if (one && one.edit) items.push({ label: 'edit this ' + one.role + ' in the admin ↗', run: function () { window.open(one.edit, '_blank'); } });
             if (one && state.search) items.push({ label: 'show in its folder', run: function () { go(one.dir ? parentOf(one.path) : (one.where || '')); } });
             if (one && one.kind === 'archive') items.push({ label: 'unzip…', run: function () { extractFlow(one); } });
@@ -813,12 +812,12 @@
             if (one && !one.dir) items.push({ label: 'copy public link', run: function () { copyLink(one); } });
             items.push('-');
             items.push({ label: 'copy', run: function () { copyOrCut('copy'); } });
-            items.push({ label: 'cut', disabled: core, run: function () { copyOrCut('cut'); } });
+            items.push({ label: 'cut', run: function () { copyOrCut('cut'); } });
             if (one && one.dir && state.clip) items.push({ label: 'paste into this folder', run: function () { var c = state.clip; transfer(c.mode, c.paths, one.path); } });
-            items.push({ label: 'rename', disabled: !one || core, run: function () { rename(one); } });
+            items.push({ label: 'rename', disabled: !one, run: function () { rename(one); } });
             items.push({ label: 'info', disabled: !one, run: function () { props(one); } });
             items.push('-');
-            items.push({ label: 'delete', danger: true, disabled: core, run: function () { remove(sel); } });
+            items.push({ label: 'delete', danger: true, run: function () { remove(sel); } });
         } else {
             var here = !state.search;
             items.push({ label: 'upload files…', disabled: !here, run: function () { $('#fb-pick').click(); } });
@@ -841,9 +840,9 @@
         if (key === 'Escape') { hideMenu(); select([], null); return; }
         if (mod && key.toLowerCase() === 'a') { e.preventDefault(); select(sorted().map(function (x) { return x.path; })); return; }
         if (mod && key.toLowerCase() === 'c') { if (sel.length) { e.preventDefault(); copyOrCut('copy'); } return; }
-        if (mod && key.toLowerCase() === 'x') { if (sel.length && !sel.some(function (x) { return x.dir && isCore(x.path); })) { e.preventDefault(); copyOrCut('cut'); } return; }
+        if (mod && key.toLowerCase() === 'x') { if (sel.length) { e.preventDefault(); copyOrCut('cut'); } return; }
         if (mod && key.toLowerCase() === 'v') { if (state.clip) { e.preventDefault(); paste(); } return; }
-        if (key === 'Delete') { if (sel.length && !sel.some(function (x) { return x.dir && isCore(x.path); })) { e.preventDefault(); remove(sel); } return; }
+        if (key === 'Delete') { if (sel.length) { e.preventDefault(); remove(sel); } return; }
         if (key === 'F2') { if (sel.length === 1) { e.preventDefault(); rename(sel[0]); } return; }
         if (key === 'Enter') { if (sel.length === 1) { e.preventDefault(); openEntry(sel[0]); } return; }
         if (key === 'Backspace' || (e.altKey && key === 'ArrowUp')) { if (state.cwd) { e.preventDefault(); go(parentOf(state.cwd)); } return; }

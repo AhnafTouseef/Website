@@ -966,11 +966,16 @@ def media(filename):
     return send_from_directory(CONTENT_DIR, filename)
 
 
+ACTIVE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+_ACTIVE_SUFFIXES = (".html", ".htm", ".xhtml", ".xht", ".xml", ".xsl", ".xslt", ".svg", ".js", ".mjs")
+
+
 @app.after_request
 def _svg_headers(response):
-    """An SVG opened directly (not through <img>) must not be able to run anything."""
-    if request.path.lower().endswith(".svg"):
-        response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+    """Any file can be stored in content/, but one a browser would run when opened directly (an SVG, an HTML page, a
+    script) is always sent in a sandbox: it cannot run scripts or reach the site, the admin session or its cookies."""
+    if request.path.lower().endswith(".svg") or (request.endpoint == "media" and request.path.lower().endswith(_ACTIVE_SUFFIXES)):
+        response.headers["Content-Security-Policy"] = ACTIVE_CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
     elif request.path.startswith(("/static/", "/media/")):
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -5294,17 +5299,21 @@ def branding():
 # Deleting moves things to _trash/ (restorable); nothing here deletes for good.
 # ===========================================================================
 
-FB_HIDDEN_TOP = {"css", "js"}                                  # reserved: these names belong to static/ (code), never listed, exported or imported from content/
 FB_ROLE_ROOTS = {"course": ("course", "admin.course_edit"),
                  "instructors": ("instructor", "admin.instructor_edit"),
                  "webinars": ("webinar", "admin.webinar_edit")}
-FB_PROTECTED = {("course",), ("instructors",), ("webinars",), ("images",), ("logo",)}
+# The file browser behaves like a file manager on a computer: any file type can be uploaded, created, renamed, moved,
+# opened or downloaded, and nothing is checked against its name. These sets only decide how a file is SHOWN (icon,
+# preview) and which files are offered to the text editor; they never refuse anything.
 FB_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico"}
-FB_DOC_EXTS = {".pdf", ".txt", ".md", ".csv", ".json", ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt", ".odt", ".ods", ".odp"}
-FB_MEDIA_EXTS = {".mp4", ".webm", ".mov", ".mp3", ".m4a", ".ogg", ".wav"}
 FB_ARCHIVE_EXTS = {".zip"}
-FB_ALLOWED_EXTS = FB_IMAGE_EXTS | FB_DOC_EXTS | FB_MEDIA_EXTS | FB_ARCHIVE_EXTS
 FB_TEXT_EXTS = {".json", ".csv", ".txt", ".md"}
+FB_BINARY_EXTS = ((FB_IMAGE_EXTS - {".svg"}) | FB_ARCHIVE_EXTS
+                  | {".pdf", ".xlsx", ".xls", ".docx", ".doc", ".pptx", ".ppt", ".odt", ".ods", ".odp",
+                     ".mp4", ".webm", ".mov", ".mp3", ".m4a", ".ogg", ".wav", ".exe", ".dll", ".bin", ".7z", ".rar", ".gz", ".tar"})
+# Files a browser would RUN if they were opened as a web page from our own address. They are stored and served like any
+# other file, but always in a sandbox (no scripts, no access to the site or the admin session).
+FB_ACTIVE_EXTS = {".html", ".htm", ".xhtml", ".xht", ".xml", ".xsl", ".xslt", ".svg", ".js", ".mjs"}
 FB_EDIT_LIMIT = 512 * 1024
 FB_CSV_LIMIT = 3 * 1024 * 1024      # the table editor handles bigger files than the plain text box
 FB_CSV_MAX_ROWS = 60000
@@ -5389,8 +5398,6 @@ def _fb_parts(rel, allow_empty=True):
     for p in parts:
         if p == ".." or p.startswith(".") or _FB_NAME_BAD.search(p) or len(p) > FB_MAX_NAME:
             raise FBError("Invalid path.")
-    if parts and parts[0] in FB_HIDDEN_TOP:
-        raise FBError("That folder is not available here.", 403)
     if not parts and not allow_empty:
         raise FBError("Choose a file or folder first.")
     return parts
@@ -5446,22 +5453,6 @@ def _fb_kind(ext):
     return "doc"
 
 
-def _fb_verify(ext, head):
-    """None when the first bytes fit the extension, else a short reason. A file name is never trusted."""
-    if ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-        want = {".jpeg": ".jpg"}.get(ext, ext)
-        return None if _sniff_image(head) == want else f"it is not a real {ext[1:].upper()} image"
-    if ext == ".pdf":
-        return None if head.lstrip()[:5] == b"%PDF-" else "it is not a real PDF"
-    if ext == ".ico":
-        return None if head[:4] == b"\x00\x00\x01\x00" else "it is not a real icon file"
-    if ext in {".zip", ".xlsx", ".docx", ".pptx", ".odt", ".ods", ".odp"}:
-        return None if head[:2] == b"PK" else "it is not a real zip-based file"
-    if ext in {".xls", ".doc", ".ppt"}:
-        return None if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" else "it is not a real Office file"
-    return None
-
-
 def _fb_unique(path, is_dir=False):
     folder, name = os.path.split(path)
     stem, ext = (name, "") if is_dir else os.path.splitext(name)
@@ -5502,9 +5493,8 @@ def _fb_entry(parent, entry):
         out["kind"] = _fb_kind(ext)
         out["size"] = st.st_size
         out["url"] = url_for("media", filename=rel)
-        out["text"] = ext in FB_TEXT_EXTS and st.st_size <= FB_EDIT_LIMIT
+        out["text"] = ext not in FB_BINARY_EXTS and st.st_size <= FB_EDIT_LIMIT
         out["grid"] = ext == ".csv" and st.st_size <= FB_CSV_LIMIT
-        out["allowed"] = ext in FB_ALLOWED_EXTS
     return out
 
 
@@ -5514,8 +5504,6 @@ def _fb_trash(parts, force=False):
     """Move one file or folder to _trash/ together with a note of where it came from."""
     if not parts:
         raise FBError("Choose a file or folder first.")
-    if not force and tuple(parts) in FB_PROTECTED:
-        raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be deleted.")
     src = _fb_abs(parts, must_exist=True)
     root = _trash_dir()
     os.makedirs(root, exist_ok=True)
@@ -5608,8 +5596,6 @@ def _fb_bulk(move):
     plan = []
     for item in raw[:500]:
         parts = _fb_parts(item, allow_empty=False)
-        if move and tuple(parts) in FB_PROTECTED:
-            raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be moved.")
         src = _fb_abs(parts, must_exist=True)
         is_dir = os.path.isdir(src)
         if is_dir and dest_parts[:len(parts)] == parts:
@@ -5671,10 +5657,6 @@ def _zip_scan(zf):
         if info.flag_bits & 0x1:
             skipped.append((name, "it is password protected"))
             continue
-        ext = _fb_ext(segs[-1])
-        if ext not in FB_ALLOWED_EXTS:
-            skipped.append((name, f"files of type '{ext or 'none'}' are not allowed"))
-            continue
         total += info.file_size
         if info.file_size > 20 * 1024 * 1024 and info.file_size / max(info.compress_size, 1) > 1000:
             return [], [], f"'{segs[-1]}' compresses suspiciously well (a zip bomb?), so the zip was refused."
@@ -5711,38 +5693,18 @@ def _zip_extract(zf, members, base_parts, policy, budget):
         except (FBError, OSError) as exc:
             st["skipped"].append((label, getattr(exc, "message", None) or "a file is in the way"))
             continue
-        ext = _fb_ext(segs[-1])
         tmp = os.path.join(os.path.dirname(dst), ".tmp-" + secrets.token_hex(4))
         try:
             with zf.open(info) as src, open(tmp, "wb") as out:
-                head = src.read(4096)
-                bad = _fb_verify(ext, head)
-                if bad:
-                    st["skipped"].append((label, bad))
-                    out.close()
-                    os.unlink(tmp)
-                    continue
-                if ext == ".svg":
-                    data = head + src.read(SVG_LIMIT + 1)
-                    clean, reason = check_svg(data)
-                    if not clean:
-                        st["skipped"].append((label, "SVG refused: " + reason))
-                        out.close()
-                        os.unlink(tmp)
-                        continue
-                    out.write(clean)
-                    written = len(clean)
-                else:
-                    out.write(head)
-                    written = len(head)
-                    while True:
-                        chunk = src.read(1024 * 256)
-                        if not chunk:
-                            break
-                        written += len(chunk)
-                        if written > info.file_size + 1024 or written > budget["left"]:
-                            raise FBError("The zip unpacked to more than it declared; stopped.")
-                        out.write(chunk)
+                written = 0
+                while True:
+                    chunk = src.read(1024 * 256)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > info.file_size + 1024 or written > budget["left"]:
+                        raise FBError("The zip unpacked to more than it declared; stopped.")
+                    out.write(chunk)
             budget["left"] -= written
             if exists and policy == "rename":
                 dst = _fb_unique(dst)
@@ -5782,7 +5744,7 @@ def _fb_dest_conflicts(base_parts, members):
 def files():
     _import_clean_old()
     return render_template("admin_files.html", start=request.args.get("path", ""), batch_limit=BIG_UPLOAD_LIMIT,
-                           edit_limit=FB_EDIT_LIMIT, allowed=sorted(FB_ALLOWED_EXTS),
+                           edit_limit=FB_EDIT_LIMIT,
                            parts=TRANSFER_PARTS, stats=_transfer_stats(), limit=BIG_UPLOAD_LIMIT)
 
 
@@ -5797,7 +5759,7 @@ def files_list():
         for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
             rel = os.path.relpath(dirpath, os.path.realpath(CONTENT_DIR)).replace(os.sep, "/")
             here = [] if rel == "." else rel.split("/")
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not (not here and d in FB_HIDDEN_TOP))
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
             try:
                 scan = [e for e in os.scandir(dirpath) if _fb_visible(e)]
             except OSError:
@@ -5814,11 +5776,10 @@ def files_list():
                 break
     else:
         for e in os.scandir(base):
-            if not _fb_visible(e) or (not parts and e.name in FB_HIDDEN_TOP):
+            if not _fb_visible(e):
                 continue
             entries.append(_fb_entry(parts, e))
-    return {"ok": True, "path": "/".join(parts), "entries": entries, "search": bool(q), "truncated": truncated,
-            "protected": tuple(parts) in FB_PROTECTED}
+    return {"ok": True, "path": "/".join(parts), "entries": entries, "search": bool(q), "truncated": truncated}
 
 
 @admin_bp.get("/files/api/tree")
@@ -5828,7 +5789,7 @@ def files_tree():
     base = _fb_dir(parts)
     out = []
     for e in sorted(os.scandir(base), key=lambda x: x.name.lower()):
-        if not _fb_visible(e) or not e.is_dir() or (not parts and e.name in FB_HIDDEN_TOP):
+        if not _fb_visible(e) or not e.is_dir():
             continue
         try:
             more = any(_fb_visible(c) and c.is_dir() for c in os.scandir(e.path))
@@ -5904,16 +5865,14 @@ def files_newfile():
     parts = _fb_parts(body.get("path"))
     base = _fb_dir(parts)
     name = _fb_check_name(body.get("name"))
-    if _fb_ext(name) not in FB_TEXT_EXTS:
-        raise FBError("A new file must end in .txt, .md, .csv or .json.")
     why = _fb_slot_error(parts + [name], False)
     if why:
         raise FBError(why[0].upper() + why[1:])
     target = os.path.join(base, name)
     if os.path.exists(target):
         raise FBError(f"'{name}' already exists here.", 409)
-    with open(target, "x", encoding="utf-8") as fh:
-        fh.write("{}\n" if name.lower().endswith(".json") else "")
+    with open(target, "x", encoding="utf-8"):
+        pass                                           # a new file is empty, like "new text document" on a computer
     return {"ok": True, "path": "/".join(parts + [name])}
 
 
@@ -5922,13 +5881,9 @@ def files_newfile():
 def files_rename():
     body = _fb_body()
     parts = _fb_parts(body.get("path"), allow_empty=False)
-    if tuple(parts) in FB_PROTECTED:
-        raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be renamed.")
     src = _fb_abs(parts, must_exist=True)
     name = _fb_check_name(body.get("name"))
     is_dir = os.path.isdir(src)
-    if not is_dir and _fb_ext(name) not in FB_ALLOWED_EXTS:
-        raise FBError(f"Files of type '{_fb_ext(name) or 'none'}' are not allowed here.")
     why = _fb_slot_error(parts[:-1] + [name], is_dir)
     if why:
         raise FBError(why[0].upper() + why[1:])
@@ -5959,9 +5914,6 @@ def files_delete():
         raise FBError("Choose at least one file or folder.")
     targets = [_fb_parts(p, allow_empty=False) for p in raw[:500]]
     for parts in targets:
-        if tuple(parts) in FB_PROTECTED:
-            raise FBError(f"'{parts[-1]}' is a core folder of the site and cannot be deleted.")
-    for parts in targets:
         _fb_trash(parts)
     log.info("admin: file browser moved %d item(s) to trash", len(targets))
     return {"ok": True, "count": len(targets)}
@@ -5991,15 +5943,6 @@ def files_upload():
             out["skipped"].append([label, "it has no usable name"])
             continue
         ext = _fb_ext(segs[-1])
-        if ext not in FB_ALLOWED_EXTS:
-            out["skipped"].append([label, f"files of type '{ext or 'none'}' are not allowed"])
-            continue
-        head = f.stream.read(4096)
-        f.stream.seek(0)
-        bad = _fb_verify(ext, head)
-        if bad:
-            out["skipped"].append([label, bad])
-            continue
         if extract and ext == ".zip":
             try:
                 with zipfile.ZipFile(f.stream) as zf:
@@ -6037,15 +5980,7 @@ def files_upload():
             continue
         tmp = os.path.join(os.path.dirname(dst), ".tmp-" + secrets.token_hex(4))
         try:
-            if ext == ".svg":
-                data = f.stream.read(SVG_LIMIT + 1)
-                clean, reason = check_svg(data)
-                if not clean:
-                    out["skipped"].append([label, "SVG refused: " + reason])
-                    continue
-                _atomic_write(tmp, clean)
-            else:
-                f.save(tmp)
+            f.save(tmp)
             if exists and policy == "rename":
                 dst = _fb_unique(dst)
                 out["renamed"] += 1
@@ -6105,7 +6040,7 @@ def files_raw():
     except FBError:
         abort(404)
     ext = _fb_ext(parts[-1])
-    if not os.path.isfile(path) or ext not in FB_ALLOWED_EXTS:
+    if not os.path.isfile(path):
         abort(404)
     mime = {".json": "application/json", ".csv": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
             ".md": "text/plain; charset=utf-8", ".svg": "image/svg+xml"}.get(ext) or mimetypes.guess_type(parts[-1])[0] or "application/octet-stream"
@@ -6115,8 +6050,8 @@ def files_raw():
         resp.headers["Content-Type"] = mime
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "SAMEORIGIN"
-    if ext == ".svg":
-        resp.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+    if ext in FB_ACTIVE_EXTS:
+        resp.headers["Content-Security-Policy"] = ACTIVE_CSP
     return resp
 
 
@@ -6125,15 +6060,15 @@ def files_raw():
 def files_text_read():
     parts = _fb_parts(request.args.get("path"), allow_empty=False)
     path = _fb_abs(parts, must_exist=True)
-    if _fb_ext(parts[-1]) not in FB_TEXT_EXTS or not os.path.isfile(path):
-        raise FBError("Only .json, .csv, .txt and .md files can be edited here.")
+    if not os.path.isfile(path):
+        raise FBError("That is not a file.")
     if os.path.getsize(path) > FB_EDIT_LIMIT:
         raise FBError(f"That file is larger than {FB_EDIT_LIMIT // 1024} KB; download it to edit it.")
     try:
         with open(path, encoding="utf-8-sig", newline="") as fh:
             text = fh.read()
     except UnicodeDecodeError:
-        raise FBError("That file is not UTF-8 text, so it cannot be edited here.")
+        raise FBError("That file is not text, so it cannot be edited here.", 415)
     return {"ok": True, "text": text, "mtime": os.path.getmtime(path), "name": parts[-1]}
 
 
@@ -6144,8 +6079,8 @@ def files_text_save():
     parts = _fb_parts(body.get("path"), allow_empty=False)
     path = _fb_abs(parts, must_exist=True)
     ext = _fb_ext(parts[-1])
-    if ext not in FB_TEXT_EXTS or not os.path.isfile(path):
-        raise FBError("Only .json, .csv, .txt and .md files can be edited here.")
+    if not os.path.isfile(path):
+        raise FBError("That is not a file.")
     text = body.get("text")
     if not isinstance(text, str):
         raise FBError("Nothing to save.")
@@ -6154,11 +6089,12 @@ def files_text_save():
     known = body.get("mtime")
     if known is not None and not body.get("force") and abs(os.path.getmtime(path) - float(known)) > 0.01:
         raise FBError("This file was changed by someone else since you opened it.", 409, {"changed": True})
-    if ext == ".json":
+    warn = None
+    if ext == ".json" and text.strip():
         try:
             json.loads(text)
         except ValueError as exc:
-            raise FBError(f"That is not valid JSON, so it was not saved: {exc}")
+            warn = f"Saved, but this is not valid JSON right now ({exc}). The site cannot read it until it is fixed."
     # the text box always works with LF line endings and no BOM: write the file the way it was (Excel needs the BOM to show non-English text)
     try:
         with open(path, "rb") as fh:
@@ -6174,7 +6110,7 @@ def files_text_save():
         data = b"\xef\xbb\xbf" + data
     _atomic_write(path, data)
     log.info("admin: edited '%s' in the file browser", "/".join(parts))
-    return {"ok": True, "mtime": os.path.getmtime(path)}
+    return {"ok": True, "mtime": os.path.getmtime(path), "warn": warn}
 
 
 # ---------- the CSV table editor ----------
@@ -6387,7 +6323,7 @@ TRANSFER_IDS = [p[0] for p in TRANSFER_PARTS]
 
 def _transfer_part_of(rel_segs):
     """Which export part a path under content/ belongs to."""
-    if not rel_segs or rel_segs[0] in FB_HIDDEN_TOP:
+    if not rel_segs:
         return None
     return _TRANSFER_BY_FOLDER.get(rel_segs[0], "other") if len(rel_segs) > 1 or rel_segs[0] in _TRANSFER_BY_FOLDER else "other"
 
@@ -6398,11 +6334,10 @@ def _transfer_walk():
     for dirpath, dirnames, names in os.walk(root, followlinks=False):
         rel = os.path.relpath(dirpath, root).replace(os.sep, "/")
         here = [] if rel == "." else rel.split("/")
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not (not here and d in FB_HIDDEN_TOP)
-                             and not os.path.islink(os.path.join(dirpath, d)))
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
         for n in sorted(names):
             full = os.path.join(dirpath, n)
-            if n.startswith(".") or os.path.islink(full) or _fb_ext(n) not in FB_ALLOWED_EXTS or _FB_NAME_BAD.search(n):
+            if n.startswith(".") or os.path.islink(full) or _FB_NAME_BAD.search(n):
                 continue
             try:
                 size = os.path.getsize(full)
@@ -6586,7 +6521,7 @@ def transfer_import_apply(token):
                     os.makedirs(target, exist_ok=True)
                 else:
                     for e in list(os.scandir(_fb_abs([]))):
-                        if _fb_visible(e) and e.name not in FB_HIDDEN_TOP and e.name not in _TRANSFER_BY_FOLDER:
+                        if _fb_visible(e) and e.name not in _TRANSFER_BY_FOLDER:
                             _fb_trash([e.name], force=True)
         res = _zip_extract(zf, wanted, [], "skip" if mode == "add" else "replace", {"left": UNZIP_MAX_TOTAL})
     try:
@@ -6659,4 +6594,4 @@ _seed_coming_soon()
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5001)
+    app.run(debug=True, port=5001)

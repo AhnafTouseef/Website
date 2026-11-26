@@ -141,7 +141,7 @@ by whatever means you use; the content moves through the **Transfer** section at
 2. **New server:** put the code there, `pip install -r requirements.txt`, `python app.py` (a fresh admin password and secret key are generated; set your own with `ADMIN_PASSWORD` / `SECRET_KEY`).
 3. **New server:** admin, *Files*, scroll to *Transfer*, drop the zip on the import box. You see what it contains and how much already exists, then choose *add only what is new*, *add and overwrite* or *make this server match the zip* (which first moves the current content to the trash, so it is restorable).
 
-The zip never contains code, the admin password, the secret key, the trash or hidden files. It is checked while importing: only allowed file types, real file contents, no paths leaving `content/`, size and entry limits.
+The zip never contains code, the admin password, the secret key, the trash or hidden files. Every file type travels. It is checked while importing only for safety: no paths leaving `content/`, no links or password-protected entries, size and entry limits.
 
 ## File browser
 
@@ -156,7 +156,11 @@ Admin, *files*: a full file manager for everything under `content/` (the code in
 - Keyboard: click / Ctrl-click / Shift-click, Ctrl+A, F2, Delete, Enter, Backspace (up), Ctrl+C / X / V, arrow keys.
 - Inside `course/`, `instructors/` and `webinars/` every folder is one course, person or webinar, so folder names must be lowercase slugs and loose files are not accepted there.
 
-Safety: allowed types only (images, PDF, Office/OpenDocument, txt/md/csv/json, zip, common audio/video; never html, js, py, exe...), file contents are checked against the type, SVGs go through the same check as logos, hostile names and `..` paths are refused, links are ignored, zip bombs and "zip slip" archives are refused. Everything in `static/` is public on the website, so put only what you want shown there.
+It behaves like a file manager on a computer: **any file type** can be uploaded, created (a new file starts empty, any name), renamed to any extension, opened or downloaded, and nothing is checked against its name or contents (a `.jpg` that is not really a picture is stored as it is; an empty `.json` can be saved; a `.json` that is not valid JSON saves with a note, not a refusal). Double-clicking opens a file in the text editor when it is text (any extension, up to 512 KB) and downloads it when it is not. SVG files are stored exactly as uploaded.
+
+Everything inside `content/` is dynamic, so every folder in it, including `course`, `instructors`, `webinars`, `images`, `logo`, `site` and `faq`, can be deleted (it goes to the trash and can be restored), renamed or moved. The site shows empty states without them, and adding a course, webinar or instructor from the admin recreates its folder.
+
+What is still guarded, because it protects the site rather than restricting you: names with characters Windows does not allow, names starting with a dot, `..` paths and links, zip bombs and "zip slip" archives are refused. Files that a browser would run if opened as a page (`.html`, `.js`, `.svg`, `.xml`) are served from `/media/` inside a sandbox, so they cannot run scripts or touch the admin session. The photo and CV fields in the course and instructor editors still require a real image / PDF, because the site draws them as such. Everything in `static/` is public on the website, so put only what you want shown there.
 
 Limits (environment variables): `MAX_UPLOAD_MB` (default 300, per upload batch or import zip) and `MAX_UNZIP_MB` (default 1000, what a zip may unpack to). The browser splits big uploads into batches automatically. This needs Flask 3.1 or newer (`pip install -U Flask`); on older Flask uploads are limited to 12 MB.
 
