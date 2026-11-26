@@ -6,6 +6,7 @@
     <title>{% block title %}Practical Student Learning{% endblock %} · {{ site_name }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}" />
+    {% if custom_assets and custom_assets.css %}<link rel="stylesheet" href="{{ custom_assets.css }}" />{% endif %}
 </head>
 <body>
     {% if show_banner %}
@@ -179,5 +180,17 @@
             });
         })();
     </script>
+    {% if custom_assets and custom_assets.js %}<script src="{{ custom_assets.js }}" defer></script>{% endif %}
+    {% if custom_assets and custom_assets.preview %}
+    <div id="cc-preview" style="position:fixed;left:0;right:0;bottom:0;z-index:2147483647;display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:center;padding:.55rem .8rem;background:#1d1735;color:#e9e3ff;font:14px/1.3 system-ui,sans-serif;border-top:2px solid #7c5cff;">
+        <span>Previewing your <b>draft</b> custom code. Only you see this.</span>
+        <a href="{{ custom_assets.editor }}" style="color:#c4b5fd;">Back to editor</a>
+        <form method="post" action="{{ custom_assets.stop }}" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ custom_assets.csrf }}">
+            <input type="hidden" name="action" value="stop_preview">
+            <button type="submit" style="font:inherit;padding:.15rem .7rem;border:1px solid #7c5cff;background:transparent;color:#fff;border-radius:4px;cursor:pointer;">Stop preview</button>
+        </form>
+    </div>
+    {% endif %}
 </body>
 </html>

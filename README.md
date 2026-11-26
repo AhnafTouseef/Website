@@ -119,6 +119,19 @@ naming the problem: selectors, braces, `@rules`, `url()`, `image-set()`, `expres
 `cursor`, `content`, background/mask/border images, `position` other than static/relative, and `z-index` outside -1..10.
 Nothing can be loaded from elsewhere and a picture cannot cover the page.
 
+## Custom CSS and JS (admin → Custom code)
+
+Style and behaviour changes (colours, spacing, animations, small scripts) go here instead of into the base files.
+
+- **Where it loads:** the CSS link comes after `main.css` and `responsive.css`, the JS script is the last thing on the page, on every public page. It is never loaded on the admin pages, so a bad stylesheet cannot lock you out of the editor.
+- **Where it lives:** `content/site/custom.json` (the published code, the draft and the on/off switch) and `content/site/custom-history.json` (replaced versions). Not in `static/`, which only holds the site's own css and js. Both travel with Files → Transfer ("other" part). Visitors get the code from `/custom.css` and `/custom.js`.
+- **Switch:** on / off at the top. Off keeps the saved code but visitors get the base site only.
+- **Draft and preview:** *save draft* keeps work in progress without touching the live site. *Save & preview* opens the public site with the draft applied, for the logged-in admin's browser only; a bar at the bottom says so and has *Stop preview*. *Publish* makes it live (if the switch is on). *Discard draft* goes back to the published code.
+- **History:** every time published code is replaced, the old version is kept (the last 20). *Load into editor* puts it in the draft; *restore & publish* makes it live at once (the code it replaces goes into the history too).
+- **JS errors:** the script runs inside a try block, so a runtime error is written to the browser console (`[custom.js]`) and cannot stop anything else on the page. A *syntax* error only stops the custom script itself.
+- **Way out:** add `?nocustom=1` to any public address to see that page without custom code.
+- **Limits:** 200 KB each for CSS and JS. The CSS box warns (but still saves) when its `{` and `}` do not pair up. One site-wide CSS and one JS; no per-page versions.
+
 ## Moving to another server (zip for content)
 
 Courses, instructors, webinars, images and logos are your data, not code, and live in `content/`. The code can move
@@ -270,6 +283,7 @@ What it does:
 | Instructors | the people behind the courses: add, edit, publish/hide, delete (see below) |
 | Files | the file browser (below), and under it **Transfer**: export / import all content as one zip. Every `.csv` opens in a **table editor** (below). Drag a rectangle over empty space or the size / date columns to select several items (Ctrl or Shift adds to the selection) |
 | Profile | one page, one Save button: **Branding** (logos, home slide; see below) and **Contact** (email, phone, WhatsApp, location, social accounts, footer text, bKash number and payment instructions) |
+| Custom code | your own CSS and JS, loaded after the base code (see below) |
 | Visitors | who visits the site, by day, country, device and source |
 | Messages | the FAQ form inbox: one line per message like a mail app; click a line to read it in a popup, which also marks it as read (reply, mark as unread, delete) |
 | Trash | deleted courses, instructors, webinars, files and messages are moved to `_trash/` (outside `content/`), restorable or deletable forever. The type column shows the file's extension (`csv`, `jpg`, …, `folder`); click any column heading to sort, click again to reverse |

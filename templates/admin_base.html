@@ -17,6 +17,7 @@
             <a href="{{ url_for('admin.instructors_list') }}" class="{{ 'on' if request.endpoint in ('admin.instructors_list', 'admin.instructor_new', 'admin.instructor_edit') }}">Instructors</a>
             <a href="{{ url_for('admin.files') }}" class="{{ 'on' if request.endpoint in ('admin.files', 'admin.transfer') or (request.endpoint or '').startswith('admin.transfer_import') }}">Files</a>
             <a href="{{ url_for('admin.profile') }}" class="{{ 'on' if request.endpoint in ('admin.profile', 'admin.contact', 'admin.branding') }}">Profile</a>
+            <a href="{{ url_for('admin.custom_code') }}" class="{{ 'on' if request.endpoint in ('admin.custom_code', 'admin.custom_history') }}">Custom code</a>
             <a href="{{ url_for('admin.visitors') }}" class="{{ 'on' if request.endpoint == 'admin.visitors' }}">Visitors</a>
             <a href="{{ url_for('admin.messages') }}" class="{{ 'on' if request.endpoint == 'admin.messages' }}">Messages{% if msg_new %} <span class="badge">({{ msg_new }})</span>{% endif %}</a>
             <a href="{{ url_for('admin.trash') }}" class="{{ 'on' if request.endpoint == 'admin.trash' }}">Trash{% if trash_count %} <span class="badge">({{ trash_count }})</span>{% endif %}</a>

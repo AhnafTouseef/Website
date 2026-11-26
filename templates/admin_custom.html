@@ -1,0 +1,150 @@
+{% extends "admin_base.html" %}
+{% block title %}custom code{% endblock %}
+{% block content %}
+<div class="a-title">
+    <h1>Custom code</h1>
+    <span class="sub">CSS and JS that load after the base code on every public page, so the base files stay as they are · never loaded on these admin pages</span>
+    <div class="right">
+        <a class="a-btn" href="{{ url_for('home') }}" target="_blank" rel="noopener">view site ↗</a>
+    </div>
+</div>
+
+{% for e in errors %}<div class="a-flash error">{{ e }} Nothing was saved.</div>{% endfor %}
+
+<section class="panel">
+    <header>
+        <b>status</b>
+        <span class="right">
+            <form class="inline" method="post" action="{{ url_for('admin.custom_code') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="action" value="toggle">
+                <input type="hidden" name="enabled" value="{{ '0' if st.enabled else '1' }}">
+                <button class="a-btn small {{ 'danger' if st.enabled else 'primary' }}" type="submit">{{ 'turn off' if st.enabled else 'turn on' }}</button>
+            </form>
+        </span>
+    </header>
+    <div class="body">
+        <dl class="kv">
+            <dt>Public site</dt>
+            <dd><span class="chip {{ 'published' if st.enabled else 'hidden' }}">{{ 'on' if st.enabled else 'off' }}</span>
+                {% if st.enabled %}visitors get the published code{% else %}visitors get the base code only; what you saved is kept{% endif %}</dd>
+            <dt>Published</dt>
+            <dd>{% if st.published_at %}{{ st.published_at }} · CSS {{ sizes.css|filesize }}, JS {{ sizes.js|filesize }}{% elif sizes.css or sizes.js %}yes{% else %}nothing yet{% endif %}</dd>
+            <dt>Draft</dt>
+            <dd>{% if st.has_draft %}<span class="chip draft">unpublished changes</span> saved {{ st.saved_at or 'earlier' }}{% else %}same as published{% endif %}</dd>
+            <dt>Preview</dt>
+            <dd>{% if previewing %}<span class="chip soon">on</span> you see the draft on the public site, in this browser only
+                <form class="inline" method="post" action="{{ url_for('admin.custom_code') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="stop_preview">
+                    <button class="a-btn small" type="submit">stop preview</button>
+                </form>{% else %}<span class="dim">off</span>{% endif %}</dd>
+        </dl>
+    </div>
+</section>
+
+<form method="post" action="{{ url_for('admin.custom_code') }}" id="cc-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <section class="panel">
+        <header><b>CSS</b><span>loaded last, so it wins over main.css and responsive.css at equal specificity</span>
+            <span class="right dim mono-sm"><span id="cc-css-n">0</span> / {{ limit // 1024 }} KB</span></header>
+        <div class="body">
+            <textarea name="css" id="cc-css" class="cc-area" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="/* e.g. .btn-primary { transition: transform .2s; } */">{{ css }}</textarea>
+        </div>
+    </section>
+
+    <section class="panel">
+        <header><b>JS</b><span>loaded last, after the page is parsed; a runtime error is logged to the console and stops nothing else</span>
+            <span class="right dim mono-sm"><span id="cc-js-n">0</span> / {{ limit // 1024 }} KB</span></header>
+        <div class="body">
+            <textarea name="js" id="cc-js" class="cc-area" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="// e.g. document.querySelectorAll('.card').forEach(function (c) { c.classList.add('fade-in'); });">{{ js }}</textarea>
+        </div>
+    </section>
+
+    <div class="cc-actions">
+        <button class="a-btn" type="submit" name="action" value="save">save draft</button>
+        <button class="a-btn" type="submit" name="action" value="preview" formtarget="_blank">save &amp; preview ↗</button>
+        <button class="a-btn primary" type="submit" name="action" value="publish">publish</button>
+        <span class="dim" id="cc-dirty" hidden>unsaved changes in the boxes above</span>
+        <span class="right">
+            <button class="a-btn danger" type="submit" name="action" value="discard" formnovalidate data-confirm-text="Discard the draft and show the published code in the editor again?" {{ '' if st.has_draft else 'disabled' }}>discard draft</button>
+        </span>
+    </div>
+</form>
+
+<section class="panel">
+    <header><b>history</b><span>the last {{ history|length }} replaced version(s), newest first · up to 20 are kept</span></header>
+    {% if history %}
+    <div class="scroll-x">
+    <table class="t">
+        <thead><tr><th>replaced</th><th class="num">CSS</th><th class="num">JS</th><th>actions</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+            <tr class="row">
+                <td class="mono-sm nowrap">{{ h.at }}</td>
+                <td class="num">{{ h.css.encode('utf-8')|length|filesize }}</td>
+                <td class="num">{{ h.js.encode('utf-8')|length|filesize }}</td>
+                <td class="nowrap">
+                    <form class="inline" method="post" action="{{ url_for('admin.custom_history', item_id=h.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small" type="submit" name="action" value="load">load into editor</button>
+                    </form>
+                    <form class="inline" method="post" action="{{ url_for('admin.custom_history', item_id=h.id) }}" data-confirm="Publish this version now? The code that is live now goes into the history and can be restored again.">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button class="a-btn small warn" type="submit" name="action" value="restore">restore &amp; publish</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="body dim">Nothing yet. Each time you publish over existing code, the old version is kept here.</div>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <header><b>good to know</b></header>
+    <div class="body cc-notes">
+        <p>Open any public page with <code>?nocustom=1</code> on the end to see it without custom code, for example if a stylesheet hides something important.</p>
+        <p>“Save &amp; preview” opens the public site with your draft applied, for you only. A bar at the bottom of the page says so and has the way out. Publishing makes it live for everyone (if the switch above is on).</p>
+        <p>The code is kept in <code>content/site/custom.json</code>, so Files → Transfer carries it along with the rest of the content.</p>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var form = document.getElementById('cc-form');
+    var css = document.getElementById('cc-css'), js = document.getElementById('cc-js');
+    var enc = window.TextEncoder ? new TextEncoder() : null;
+    var start = { css: css.value, js: js.value };
+    function bytes(s) { return enc ? enc.encode(s).length : s.length; }
+    function refresh() {
+        var a = bytes(css.value), b = bytes(js.value), lim = {{ limit }};
+        var ca = document.getElementById('cc-css-n'), cb = document.getElementById('cc-js-n');
+        ca.textContent = (a / 1024).toFixed(1); cb.textContent = (b / 1024).toFixed(1);
+        ca.style.color = a > lim ? 'var(--a-red)' : ''; cb.style.color = b > lim ? 'var(--a-red)' : '';
+        document.getElementById('cc-dirty').hidden = css.value === start.css && js.value === start.js;
+    }
+    css.addEventListener('input', refresh); js.addEventListener('input', refresh);
+    refresh();
+    form.addEventListener('submit', function (e) {
+        var btn = e.submitter, msg = null;
+        if (btn && btn.getAttribute('data-confirm-text')) msg = btn.getAttribute('data-confirm-text');
+        if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+    document.addEventListener('submit', function (e) {
+        var m = e.target.getAttribute && e.target.getAttribute('data-confirm');
+        if (m && !window.confirm(m)) e.preventDefault();
+    });
+    window.addEventListener('beforeunload', function (e) {
+        if (css.value !== start.css || js.value !== start.js) { e.preventDefault(); e.returnValue = ''; }
+    });
+    form.addEventListener('submit', function () { start = { css: css.value, js: js.value }; });
+})();
+</script>
+{% endblock %}

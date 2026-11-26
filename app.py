@@ -5,6 +5,7 @@ import contextlib
 import csv
 import difflib
 import functools
+import hashlib
 import hmac
 import io
 import ipaddress
@@ -1447,6 +1448,159 @@ def site_context():
 
 
 # ---------------------------------------------------------------------------
+# Custom CSS and JS: content/site/custom.json
+#
+# Edited in the admin console under "Custom code". It lets styling and behaviour be adjusted without touching the
+# base code: the CSS link goes after every other stylesheet, the JS goes last on the page, on every public page
+# and never on the admin pages. Both are served from /custom.css and /custom.js. They live in a JSON file (not in
+# static/, which only holds the site's own css and js) so export / import carries them with the rest of the content.
+#
+#   css, js              what visitors get while "enabled" is true
+#   draft_css, draft_js  the work in progress; only the logged-in admin who started a preview sees it
+#   custom-history.json  the versions that were replaced, newest first (restorable)
+#
+# Adding ?nocustom=1 to any public URL loads that page without the custom code (a way out of a bad stylesheet).
+# ---------------------------------------------------------------------------
+
+CUSTOM_FILE = "custom.json"
+CUSTOM_HISTORY_FILE = "custom-history.json"
+CUSTOM_LIMIT = 200 * 1024            # bytes, for the CSS and for the JS each
+CUSTOM_HISTORY_KEEP = 20
+_custom_cache = {}
+
+
+def _custom_path(name=CUSTOM_FILE):
+    return os.path.join(_site_dir(), name)
+
+
+def _read_cached_json(path):
+    """A JSON object from path, re-read only when the file changed. {} when missing or broken."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    key = (st.st_mtime_ns, st.st_size)
+    hit = _custom_cache.get(path)
+    if hit and hit[0] == key:
+        return hit[1]
+    data, _err = _read_json_checked(path)
+    data = data or {}
+    _custom_cache[path] = (key, data)
+    return data
+
+
+def read_custom():
+    """The custom code state. A missing draft means 'same as live'."""
+    raw = _read_cached_json(_custom_path())
+    text = lambda k: raw[k] if isinstance(raw.get(k), str) else ""
+    state = {"enabled": raw.get("enabled") is True, "css": text("css"), "js": text("js"),
+             "published_at": text("published_at"), "saved_at": text("saved_at")}
+    state["draft_css"] = raw["draft_css"] if isinstance(raw.get("draft_css"), str) else state["css"]
+    state["draft_js"] = raw["draft_js"] if isinstance(raw.get("draft_js"), str) else state["js"]
+    state["has_draft"] = (state["draft_css"], state["draft_js"]) != (state["css"], state["js"])
+    return state
+
+
+def _write_custom(state):
+    os.makedirs(_site_dir(), exist_ok=True)
+    keys = ("enabled", "css", "js", "draft_css", "draft_js", "published_at", "saved_at")
+    _atomic_write(_custom_path(), json.dumps({k: state[k] for k in keys}, ensure_ascii=False, indent=2))
+
+
+def read_custom_history():
+    items = _read_cached_json(_custom_path(CUSTOM_HISTORY_FILE)).get("items")
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if isinstance(it, dict) and isinstance(it.get("id"), str) and isinstance(it.get("css"), str) and isinstance(it.get("js"), str):
+            out.append({"id": it["id"], "at": str(it.get("at", "")), "css": it["css"], "js": it["js"]})
+    return out
+
+
+def _write_custom_history(items):
+    os.makedirs(_site_dir(), exist_ok=True)
+    _atomic_write(_custom_path(CUSTOM_HISTORY_FILE), json.dumps({"items": items[:CUSTOM_HISTORY_KEEP]}, ensure_ascii=False, indent=2))
+
+
+def _archive_live(state):
+    """Keep the live version in the history before it is replaced (nothing is kept for an empty version or one already there)."""
+    if not (state["css"].strip() or state["js"].strip()):
+        return
+    items = read_custom_history()
+    if any(i["css"] == state["css"] and i["js"] == state["js"] for i in items):
+        return
+    items.insert(0, {"id": secrets.token_hex(4), "at": now_bd().strftime("%Y-%m-%d %H:%M"), "css": state["css"], "js": state["js"]})
+    _write_custom_history(items)
+
+
+def _version(*parts):
+    h = hashlib.sha1()
+    for p in parts:
+        h.update(p.encode("utf-8"))
+        h.update(b"\0")
+    return h.hexdigest()[:10]
+
+
+def _preview_on():
+    return bool(session.get("custom_preview")) and bool(session.get("admin"))
+
+
+def _custom_assets():
+    """What base.html needs: the links to add and whether this is the admin's draft preview. None = nothing to load."""
+    if request.args.get("nocustom") or request.blueprint == "admin":
+        return None
+    st = read_custom()
+    preview = _preview_on()
+    if preview:
+        css, js, extra = st["draft_css"], st["draft_js"], {"draft": 1}
+    elif st["enabled"]:
+        css, js, extra = st["css"], st["js"], {}
+    else:
+        return None
+    out = {"css": None, "js": None, "preview": preview}
+    if css.strip():
+        out["css"] = url_for("custom_css", v=_version(css), **extra)
+    if js.strip():
+        out["js"] = url_for("custom_js", v=_version(js), **extra)
+    if preview:
+        out["csrf"] = _csrf_token()
+        out["editor"] = url_for("admin.custom_code")
+        out["stop"] = url_for("admin.custom_code")
+    return out if (out["css"] or out["js"] or preview) else None
+
+
+@app.context_processor
+def custom_context():
+    return {"custom_assets": _custom_assets()}
+
+
+def _custom_response(kind):
+    """The code for /custom.css or /custom.js. ?draft=1 gives the draft, and only to a logged-in admin."""
+    st = read_custom()
+    if request.args.get("draft") and _admin_session_valid():
+        code, private = st[f"draft_{kind}"], True
+    else:
+        code, private = (st[kind] if st["enabled"] else ""), False
+    if kind == "js" and code.strip():
+        # runs inside a try block on the same first line (line numbers in the console match the editor), so a runtime
+        # error in the custom code is logged and cannot stop anything else on the page
+        code = '(function () { try {' + code + '\n} catch (e) { console.error("[custom.js]", e); }\n})();\n'
+    resp = Response(code, mimetype="text/css" if kind == "css" else "text/javascript")
+    resp.headers["Cache-Control"] = "no-store" if private else "public, max-age=86400"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@app.route("/custom.css")
+def custom_css():
+    return _custom_response("css")
+
+
+@app.route("/custom.js")
+def custom_js():
+    return _custom_response("js")
+
+
+# ---------------------------------------------------------------------------
 # Contact details, footer text and payment instructions: content/site/contact.json
 #
 # Everything a visitor sees about how to reach us (footer, FAQ page) and how to pay (the box above the Enroll
@@ -2274,7 +2428,7 @@ def _set_visitor_cookie(response, vid):
 def _remember_first_visit():
     """Remember, in the visitor's session cookie, where they first came from (referring site, campaign tags in
     the link, first page). A message sent later carries that, which tells us which ads and posts bring students."""
-    if request.method != "GET" or request.blueprint == "admin" or request.endpoint in (None, "static", "media"):
+    if request.method != "GET" or request.blueprint == "admin" or request.endpoint in (None, "static", "media", "custom_css", "custom_js"):
         return
     utm = _campaign_tags()
     ft = session.get("ft")
@@ -5013,6 +5167,118 @@ def contact():
     return _profile_view(do_branding=False)
 
 
+# ---------- custom code (CSS and JS that load after the base code on every public page) ----------
+
+def _clean_code(text):
+    """Normalise a pasted text area: LF line ends, no BOM. Returns (text, error)."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
+    if "\x00" in text:
+        return text, "contains a null character"
+    if len(text.encode("utf-8")) > CUSTOM_LIMIT:
+        return text, f"is too big (the limit is {CUSTOM_LIMIT // 1024} KB)"
+    return text, None
+
+
+def _css_brace_warning(css):
+    """A cheap check, not a parser: braces that do not pair up usually mean the rest of the stylesheet is ignored."""
+    bare = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    bare = re.sub(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', "", bare)
+    if bare.count("{") != bare.count("}"):
+        return f"The CSS has {bare.count('{')} “{{” but {bare.count('}')} “}}”. A missing brace makes the browser ignore the rest of the stylesheet."
+    return None
+
+
+def _custom_stamp():
+    return now_bd().strftime("%Y-%m-%d %H:%M")
+
+
+def _custom_view(css=None, js=None, errors=(), status=200):
+    st = read_custom()
+    return render_template(
+        "admin_custom.html", st=st, css=st["draft_css"] if css is None else css, js=st["draft_js"] if js is None else js,
+        errors=list(errors), history=read_custom_history(), previewing=_preview_on(), limit=CUSTOM_LIMIT,
+        sizes={"css": len(st["css"].encode("utf-8")), "js": len(st["js"].encode("utf-8"))},
+    ), status
+
+
+@admin_bp.route("/custom", methods=["GET", "POST"])
+def custom_code():
+    if request.method == "GET":
+        return _custom_view()
+    action = request.form.get("action", "")
+    if action == "stop_preview":
+        session.pop("custom_preview", None)
+        flash("Preview stopped. Visitors never saw the draft.", "success")
+        return redirect(url_for("admin.custom_code"))
+    if action == "toggle":
+        with _data_lock():
+            st = read_custom()
+            st["enabled"] = request.form.get("enabled") == "1"
+            _write_custom(st)
+        log.info("admin: custom code switched %s", "on" if st["enabled"] else "off")
+        flash("Custom code is ON for every public page." if st["enabled"] else "Custom code is OFF. The public site runs on the base code only (your saved code is kept).", "success")
+        return redirect(url_for("admin.custom_code"))
+    if action == "discard":
+        with _data_lock():
+            st = read_custom()
+            st["draft_css"], st["draft_js"] = st["css"], st["js"]
+            _write_custom(st)
+        flash("Draft discarded. The editor shows the published code again.", "success")
+        return redirect(url_for("admin.custom_code"))
+    if action not in ("save", "preview", "publish"):
+        abort(400)
+    css, e1 = _clean_code(request.form.get("css"))
+    js, e2 = _clean_code(request.form.get("js"))
+    errors = ([f"The CSS {e1}."] if e1 else []) + ([f"The JS {e2}."] if e2 else [])
+    if errors:
+        return _custom_view(css, js, errors, 400)
+    with _data_lock():
+        st = read_custom()
+        st["draft_css"], st["draft_js"], st["saved_at"] = css, js, _custom_stamp()
+        if action == "publish":
+            if (css, js) != (st["css"], st["js"]):
+                _archive_live(st)
+            st["css"], st["js"], st["published_at"] = css, js, st["saved_at"]
+        _write_custom(st)
+    warn = _css_brace_warning(css)
+    if action == "preview":
+        session["custom_preview"] = True
+        log.info("admin: previewing custom code draft")
+        return redirect(url_for("home"))
+    if action == "publish":
+        log.info("admin: published custom code")
+        flash("Published." + ("" if st["enabled"] else " It is saved but custom code is switched OFF, so visitors do not get it yet. Switch it on above."), "success")
+    else:
+        flash("Draft saved. Visitors do not see it until you publish.", "success")
+    if warn:
+        flash(warn, "warn")
+    return redirect(url_for("admin.custom_code"))
+
+
+@admin_bp.route("/custom/history/<item_id>", methods=["POST"])
+def custom_history(item_id):
+    action = request.form.get("action", "")
+    if action not in ("load", "restore"):
+        abort(400)
+    with _data_lock():
+        item = next((i for i in read_custom_history() if i["id"] == item_id), None)
+        if not item:
+            abort(404)
+        st = read_custom()
+        st["draft_css"], st["draft_js"], st["saved_at"] = item["css"], item["js"], _custom_stamp()
+        if action == "restore":
+            if (item["css"], item["js"]) != (st["css"], st["js"]):
+                _archive_live(st)
+            st["css"], st["js"], st["published_at"] = item["css"], item["js"], st["saved_at"]
+        _write_custom(st)
+    if action == "restore":
+        log.info("admin: restored custom code %s", item_id)
+        flash(f"Restored the version from {item['at']}. The code it replaced is in the history.", "success")
+    else:
+        flash(f"Loaded the version from {item['at']} into the editor as a draft. Preview it or publish it.", "success")
+    return redirect(url_for("admin.custom_code"))
+
+
 @admin_bp.route("/branding", methods=["GET", "POST"])
 def branding():
     if request.method == "GET":
@@ -6393,4 +6659,4 @@ _seed_coming_soon()
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=False, port=5001)

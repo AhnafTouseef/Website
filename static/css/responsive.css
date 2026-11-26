@@ -264,3 +264,32 @@
     .footer-bottom { flex-direction: column; gap: 0.3rem; }
     .contact-list p { grid-template-columns: 1fr; gap: 0.1rem; }
 }
+
+/* ---------- phone: tighter vertical rhythm (the desktop layout is already scaled to 80%) ---------- */
+@media (max-width: 640px) {
+    .featured-course,
+    .pipeline-section,
+    .steps-section,
+    .founder-preview,
+    .values-section,
+    .about-story,
+    .webinar-content,
+    .faq-page { padding: 1.5rem 0; }
+    .active-course-section { padding: 0 0 1.5rem; }
+    .grid-2 { gap: 1.1rem; }
+    .section-header { margin-bottom: 0.9rem; }
+    .hero { padding: 2rem 0; }
+    .hs { padding: 1.4rem 0 0.9rem; }
+    .page-intro { padding-top: 1.3rem; }
+    .intro-copy { padding: 1.3rem 0; }
+    .wb-head { padding: 1.6rem 0 1.3rem; }
+    .wb-head.has-stage { padding-bottom: 1.5rem; }
+    .wb-empty { padding: 1.4rem 0 1.8rem; }
+    .tm-hero { padding: 1.6rem 0 1.3rem; }
+    .tm-founders, .tm-instructors { padding-top: 1.8rem; padding-bottom: 1.5rem; }
+    .profile-hero { padding: 1.7rem 0; }
+    .profile-courses, .course-sheet { padding-bottom: 1.4rem; }
+    .footer-grid { padding: 1.8rem 0 1rem; gap: 1.4rem; }
+    .suggest-section { padding-block: 0.3rem 1.4rem; }
+    .webinar-banner { padding: 1.4rem 0; }
+}
