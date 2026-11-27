@@ -2077,3 +2077,70 @@ span.px > img.px-img {
 .suggest-who { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; }
 .suggest-who .opt { font-weight: 400; color: var(--muted); font-size: 0.88em; }
 @media (max-width: 640px) { .suggest-who { grid-template-columns: 1fr; } .suggest-card { padding: 1.1rem; } }
+
+
+/* =====================================================================
+   Course details page: one Enroll button on a wide screen, tidy phone layout
+   ===================================================================== */
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+#enroll-card { scroll-margin-top: 5.5rem; }                 /* the sticky header must not cover it when the hero button scrolls here */
+.hero-enroll { display: none; }                              /* wide screen: the price card has the button */
+
+.course-hero .pill-tag { padding: 0.4rem 0.9rem; background: rgba(255, 255, 255, 0.12); font-size: 0.88rem; line-height: 1.3; }
+.course-meta-list span { display: flex; align-items: center; gap: 0.5rem; }
+
+/* what you'll learn: the tick hangs, wrapped lines line up under the text, cards in a row share a height */
+.learn-grid { align-items: stretch; }
+.learn-item { display: flex; align-items: flex-start; gap: 0.65rem; line-height: 1.4; }
+.learn-tick { flex: none; color: var(--accent); font-weight: 800; }
+
+/* instructors: equal-height cards, "View profile" always on the bottom edge */
+.team-card, a.team-card { display: flex; flex-direction: column; }
+.team-card .team-more { margin-top: auto !important; padding-top: 0.8rem; }
+.team-card h3 { margin: 0; }
+.team-card .team-role { margin: 0.3rem 0 0.7rem; }
+.team-card p:not(.team-role):not(.team-more) { margin: 0; }
+
+/* price card: one steady rhythm (the gaps used to be counted twice) */
+.pricing-card { gap: 0.8rem; }
+.pricing-card .subtle { margin: 0; }
+.pricing-card .feature-list { padding-left: 0; gap: 0.6rem; margin: 0.3rem 0; }
+.pricing-card .feature-list li { margin-bottom: 0; }
+.pricing-card .full-width { margin-top: 0.3rem; }
+
+.course-main .section-header { margin: 1.9rem 0 0.9rem; }
+.course-main .section-header:first-child { margin-top: 0; }
+
+@media (max-width: 980px) {
+    .hero-enroll { display: inline-flex; justify-content: center; }
+    /* one column: badge, title, PICTURE, then the text, facts and buttons (same order as the home page) */
+    .course-hero .hero-grid { display: flex; flex-direction: column; align-items: stretch; gap: 1rem; }
+    .course-hero .hero-copy { display: contents; }
+    .course-hero .hero-copy > .pill-tag { order: 1; align-self: flex-start; }
+    .course-hero .hero-copy > h1 { order: 2; margin: 0.1rem 0 0; }
+    .course-hero .hero-visual.course-hero-media { order: 3; align-self: stretch; }
+    .course-hero .hero-visual .course-media-card.thumb-frame { width: 100%; max-width: 640px; margin: 0; }   /* same left edge as the text, not centred and narrower */
+    .course-hero .hero-copy > p { order: 4; margin: 0; }
+    .course-hero .course-meta-list { order: 5; margin: 0.2rem 0 0; }
+    .course-hero .hero-actions { order: 6; margin-top: 0.2rem; }
+    .pricing-sidebar { position: static; }
+}
+@media (max-width: 640px) {
+    .course-hero { padding: 1.5rem 0 1.8rem; }
+    .course-hero .hero-copy > h1 { font-size: 1.85rem; line-height: 1.12; }
+    .course-hero .hero-copy > p { font-size: 1rem; line-height: 1.55; }
+    .course-meta-list { gap: 0.6rem; }
+    .course-meta-list span { padding: 0.7rem 0.8rem; border-radius: 0.9rem; font-size: 0.9rem; line-height: 1.25; }
+    .course-media-card.thumb-frame { border-radius: 1.2rem; }
+    .learn-grid { gap: 0.6rem; }
+    .learn-item { padding: 0.8rem 0.9rem; border-radius: 1rem; font-size: 0.92rem; }
+    .team-grid.cards-2 .team-card .team-role { margin: 0.2rem 0 0.5rem; }
+    .pricing-card { padding: 1.4rem 1.2rem 1.5rem; border-radius: 1.6rem; margin-bottom: 0.6rem; }
+    .pricing-card h2 { font-size: 2.1rem; margin: 0.2rem 0 0; }
+    .pricing-card .sidebar-note { margin-top: 0.2rem; font-size: 0.9rem; }
+    .course-main .section-header { margin-top: 1.5rem; }
+    .course-main .section-header h2 { font-size: 1.55rem; margin: 0; }
+}
+
+/* footer logo: line up with the text below it (the generic pill padding pushed it in by 0.95rem) */
+.footer-brand { padding-inline: 0; }

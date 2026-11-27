@@ -36,7 +36,8 @@
             </div>
             <div class="hero-actions">
                 {% if course.enroll_link %}
-                <a class="button button-primary" href="{{ url_for('course_enroll', slug=course.slug, b='hero') }}">Enroll{% if course.price %} — {{ course.price }}{% endif %} →</a>
+                {# on a wide screen the price card beside the text has the Enroll button, so this one only shows when the card is below #}
+                <a class="button button-primary hero-enroll" href="#enroll-card">Enroll{% if course.price %} — {{ course.price }}{% endif %} →</a>
                 {% endif %}
                 {% if course.webinar_link %}
                 <a class="text-link" href="{{ course.webinar_link }}" target="_blank" rel="noopener">Try our webinar first→</a>
@@ -64,7 +65,7 @@
         </div>
         <div class="learn-grid">
             {% for item in course.learn %}
-            <div class="learn-item">✔️ {{ item }}</div>
+            <div class="learn-item"><span class="learn-tick" aria-hidden="true">✔</span><span>{{ item }}</span></div>
             {% endfor %}
         </div>
         {% endif %}
@@ -92,7 +93,7 @@
         {% endif %}
     </div>
     <aside class="pricing-sidebar">
-        <div class="pricing-card">
+        <div class="pricing-card" id="enroll-card">
             <span class="section-label">Course Price</span>
             {% if course.discount %}{{ price_block(course, 'big') }}{% else %}<h2>{{ course.price }}</h2>{% endif %}
             <p class="subtle">One-time payment · Full access</p>
