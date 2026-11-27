@@ -55,9 +55,13 @@
         </section>
 
         <section class="panel">
-            <header><b>when</b><span class="opt">optional</span><span>Bangladesh time · leave both empty for “date to be announced”</span></header>
+            <header><b>when</b><span class="opt">optional</span><span>Bangladesh time · leave both empty or tick TBA for “date to be announced”</span></header>
             <div class="body">
-                <div class="when-row">
+                <label class="check" style="display:flex;gap:.5rem;align-items:center;margin-bottom:.7rem">
+                    <input type="checkbox" name="tba" id="f-tba" {% if form.tba %}checked{% endif %}>
+                    <span><b>Date to be announced (TBA)</b> <code>tba</code> <span class="opt">shows “TBA” instead of a date</span></span>
+                </label>
+                <div class="when-row" id="when-row">
                     <div class="field">
                         <label class="l" for="f-date">date <code>date</code></label>
                         <input id="f-date" type="date" name="date" value="{{ form.date }}">
@@ -69,6 +73,7 @@
                     </div>
                 </div>
                 <div class="help" id="when-preview" style="margin-top:.6rem"></div>
+                <div class="help" style="margin-top:.3rem">While TBA is ticked, any date and time you filled in are kept but hidden from visitors, and the join link does not open by itself. Untick it when the date is final.</div>
                 {% if state_note %}<div class="help" style="margin-top:.3rem"><b>Right now:</b> {{ state_note }}</div>{% endif %}
             </div>
         </section>
@@ -223,7 +228,10 @@
 
     /* plain-words preview of the date and time */
     var dateBox = document.getElementById('f-date'), timeBox = document.getElementById('f-time'), prev = document.getElementById('when-preview');
+    var tbaBox = document.getElementById('f-tba'), whenRow = document.getElementById('when-row');
     function whenPreview() {
+        whenRow.style.opacity = tbaBox.checked ? '.5' : '';
+        if (tbaBox.checked) { prev.textContent = 'Visitors will read: Date to be announced (TBA).'; return; }
         if (!dateBox.value && !timeBox.value) { prev.textContent = 'No date: listed last as “date to be announced”.'; return; }
         if (!dateBox.value || !timeBox.value) { prev.textContent = 'Fill in both the date and the start time.'; return; }
         var p = dateBox.value.split('-'), t = timeBox.value.split(':');
@@ -231,7 +239,7 @@
         var h = +t[0], ap = h >= 12 ? 'PM' : 'AM', h12 = h % 12 || 12;
         prev.innerHTML = 'Visitors will read: <b>' + d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) + ' · ' + h12 + ':' + t[1] + ' ' + ap + ' (Bangladesh time)</b>';
     }
-    dateBox.addEventListener('input', whenPreview); timeBox.addEventListener('input', whenPreview); whenPreview();
+    dateBox.addEventListener('input', whenPreview); timeBox.addEventListener('input', whenPreview); tbaBox.addEventListener('change', whenPreview); whenPreview();
 
     /* repeatable rows */
     function syncEmpty(rep) { rep.querySelector('.rep-empty').hidden = rep.querySelectorAll('.rep-rows .rep-row').length > 0; }

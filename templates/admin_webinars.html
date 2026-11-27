@@ -38,7 +38,7 @@
                 <td><span class="chip {{ w.status }}">{{ w.status }}</span></td>
                 <td>
                     {% if w.status != 'broken' %}
-                    <span class="chip {{ w.state }}">{{ {'upcoming': 'upcoming', 'started': 'started', 'tba': 'no date'}[w.state] }}</span>
+                    <span class="chip {{ w.state }}">{{ {'upcoming': 'upcoming', 'started': 'started', 'tba': 'TBA'}[w.state] }}</span>
                     <div class="mono-sm">{{ w.when }}</div>
                     {% if w.note %}<div class="dim mono-sm">{{ w.note }}</div>{% endif %}
                     {% endif %}

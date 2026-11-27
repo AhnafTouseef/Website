@@ -61,7 +61,7 @@
                 <div class="field">
                     <label class="l" for="f-icon">emoji <code>icon</code> <span class="opt">optional</span></label>
                     <input id="f-icon" type="text" name="icon" value="{{ form.icon }}" maxlength="8" placeholder="📊">
-                    <div class="help">shown on the Coming Soon card when the course has no picture.</div>
+                    <div class="help">the only picture a Coming Soon card shows (the thumbnail is kept hidden until the course opens). Empty = ✨.</div>
                 </div>
                 <div class="field span2">
                     <label class="l" for="f-description">description <code>description</code></label>
@@ -107,10 +107,20 @@
                     <div class="help">optional. Shown in the price box above the Enroll button instead of the site-wide text. Leave empty to use the text (and the bKash number) from the <a href="{{ url_for('admin.profile', _anchor='contact') }}">Profile page</a>.</div>
                 </div>
                 <div class="field span2">
-                    <label class="l" for="f-webinar">complimentary webinar link <code>webinar_link</code></label>
-                    <input id="f-webinar" type="text" name="webinar_link" value="{{ form.webinar_link }}" placeholder="https://...">
-                    <div class="help">empty = “Try free webinar first” opens the site’s own /webinar page.</div>
+                    <label class="l" for="f-webinar">complimentary webinar <code>webinar</code> <span class="opt">optional</span></label>
+                    <select id="f-webinar" name="webinar">
+                        <option value="">None</option>
+                        {% for o in webinar_options %}<option value="{{ o.slug }}"{% if form.webinar == o.slug %} selected{% endif %}>{{ o.label }}</option>{% endfor %}
+                    </select>
+                    <div class="help">pick one of the webinars you created in the <a href="{{ url_for('admin.webinars_list') }}">Webinars</a> section. The course page then shows it under the Enroll button and links to it. “None” = a webinar that lists this course is used, if any. A hidden webinar is not shown until you publish it.</div>
                 </div>
+                {% if form.webinar_link %}
+                <div class="field span2">
+                    <label class="l" for="f-webinar-link">old pasted webinar link <code>webinar_link</code></label>
+                    <input id="f-webinar-link" type="text" name="webinar_link" value="{{ form.webinar_link }}" placeholder="https://...">
+                    <div class="help">from before webinars could be picked. It is used only while no webinar is picked above. Clear it to remove it.</div>
+                </div>
+                {% endif %}
             </div>
         </section>
 
@@ -336,7 +346,7 @@
             title: val('title'), tagline: val('tagline'), subtitle: val('subtitle'), description: val('description'),
             duration: val('duration'), capacity: val('capacity'), certificate: val('certificate'),
             price: val('price'), start_date: val('start_date'), icon: val('icon'),
-            enroll_link: val('enroll_link'), webinar_link: val('webinar_link'),
+            enroll_link: val('enroll_link'), webinar: val('webinar'), webinar_link: val('webinar_link'),
             features: lines('features'), what_you_will_learn: lines('what_you_will_learn'),
             instructors: Array.prototype.slice.call(form.querySelectorAll('input[name=instructors]:checked')).map(function (c) { return c.value; })
         };

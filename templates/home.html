@@ -48,7 +48,7 @@
                             <a class="button button-outline" href="{{ url_for('webinar') }}#{{ w.slug }}">Details</a>
                             {% else %}
                             <a class="button button-primary" href="{{ url_for('webinar') }}#{{ w.slug }}">See details →</a>
-                            {% if w.rsvp_link %}<a class="button button-outline" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">Let us know you're coming</a>{% endif %}
+                            {% if w.rsvp_link and w.status != 'started' %}<a class="button button-outline" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">Let us know you're coming</a>{% endif %}
                             {% endif %}
                         </div>
                     </div>

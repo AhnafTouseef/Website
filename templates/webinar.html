@@ -18,9 +18,9 @@
     {% endif %}
 {% endmacro %}
 
-{# The optional "we're coming" headcount link. #}
+{# The optional "we're coming" headcount link. It is pointless once the webinar has started, so it disappears then. #}
 {% macro rsvp(w) %}
-    {% if w.rsvp_link %}
+    {% if w.rsvp_link and w.status != 'started' %}
     <a class="wb-rsvp" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">
         <span class="wb-rsvp-ic" aria-hidden="true">👋</span>
         <span class="wb-rsvp-tx"><b>Let us know you're coming</b><small>Optional · anyone can join</small></span>
@@ -93,7 +93,7 @@
                         {% if w.platform %}<li><span class="wb-fi" aria-hidden="true">📹</span><span><small>Where</small>{{ w.platform }}</span></li>{% endif %}
                         {% if w.capacity %}<li><span class="wb-fi" aria-hidden="true">👥</span><span><small>Seats</small>{{ w.capacity }}</span></li>{% endif %}
                     </ul>
-                    <div class="wb-actions">{{ join_block(w) }}{{ rsvp(w) }}</div>
+                    <div class="wb-actions">{{ rsvp(w) }}{{ join_block(w) }}</div>
                 </div>
             </aside>
         </article>
@@ -111,7 +111,7 @@
     </div>
 </section>
 {% elif later %}
-{# ---- the rest, one full-width notice line each. No join links here: when one becomes the soonest it moves to the top. ---- #}
+{# ---- the rest, one full-width notice line each. No join links here (when one becomes the soonest it moves to the top), but the headcount button is. ---- #}
 <section class="container wb-wrap">
     <h3 class="wb-later-title">Also coming up</h3>
     <div class="wb-rows">
@@ -125,6 +125,9 @@
                 {% if w.subtitle %}<p class="wb-sub">{{ w.subtitle }}</p>{% endif %}
                 {% set line = ([w.when_label ~ ' (Bangladesh time)'] if w.start else []) + ([w.platform] if w.platform else []) + ([w.capacity] if w.capacity else []) %}
                 {% if line %}<p class="wb-line">{{ line|join(' · ') }}</p>{% endif %}
+                {% if w.rsvp_link and w.status != 'started' %}
+                <p class="wb-row-actions"><a class="wb-rsvp-sm" href="{{ w.rsvp_link }}" target="_blank" rel="noopener">Let us know you're coming <span aria-hidden="true">→</span></a></p>
+                {% endif %}
                 {% if w.paragraphs or w.agenda or w.speakers or w.courses %}
                 <details class="wb-more">
                     <summary>More details</summary>

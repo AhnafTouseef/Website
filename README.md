@@ -132,6 +132,15 @@ Style and behaviour changes (colours, spacing, animations, small scripts) go her
 - **Way out:** add `?nocustom=1` to any public address to see that page without custom code.
 - **Limits:** 200 KB each for CSS and JS. The CSS box warns (but still saves) when its `{` and `}` do not pair up. One site-wide CSS and one JS; no per-page versions.
 
+## Link previews and search basics
+
+Every public page carries a `<meta name="description">`, a canonical link, Open Graph and Twitter-card tags (so a pasted link shows a title, description and picture), a favicon and JSON-LD (Organization on the home page, Course on course pages, Event for the next dated webinar). The picture is the course thumbnail, the instructor photo or the webinar cover where there is one, otherwise the home brand slide. The description comes from the course/instructor/webinar text, or from the home slide's text on general pages.
+
+- `/sitemap.xml` lists the home, Courses, Webinar, Team and FAQ pages, every open course and every published instructor. Coming-soon and hidden items and the admin console are never listed.
+- `/robots.txt` allows everything except the idea form and the Enroll redirect, and points to the sitemap. It never mentions the admin address (the admin pages carry `noindex` themselves).
+- `/favicon.svg` is a built-in navy tile with the first letter of `SITE_NAME`.
+- Environment variables: `SITE_URL` (for example `https://skillwaves.example`; used for the absolute links in these tags and the sitemap; empty = the address the visitor used) and `SITE_DESCRIPTION` (default description for general pages).
+
 ## Moving to another server (zip for content)
 
 Courses, instructors, webinars, images and logos are your data, not code, and live in `content/`. The code can move
@@ -193,7 +202,7 @@ The folder name becomes the course URL (`/course/<course-folder>`), so use lower
     "discount": 20,
     "start_date": "July 21, 2024",
     "enroll_link": "https://forms.gle/...",
-    "webinar_link": "",
+    "webinar": "",
     "features": ["shown in the price box"],
     "what_you_will_learn": ["shown as ticks"],
     "instructors": ["Exact Name As In profile.json"],
@@ -204,11 +213,11 @@ The folder name becomes the course URL (`/course/<course-folder>`), so use lower
 ```
 
 - `discount` (optional): a percentage from 0 to 99.99 (`20` or `12.5`). Leave it out for no discount. The public site then shows the original price grey and struck through, the new price in a vivid red, and an "N% OFF" badge on the card thumbnail and course page; the Enroll button shows the discounted price too. The new price is worked out with whole-number maths and keeps your currency text, commas and decimals (`Tk 1,500.00` at 12.5% = `Tk 1,312.50`). `price` must contain a number for a discount to apply (a warning is logged otherwise). Keep `price` as the normal, undiscounted price.
-- `webinar_link` empty = the "Try free webinar first" link opens the site's own `/webinar` page.
+- `webinar` (optional): the folder name of a webinar from the **Webinars** section, picked from a dropdown in the course editor (hidden webinars are listed too, marked "(hidden)", but only a published one is shown). The course page then shows "Webinar: title · date →" linking to it on `/webinar`. Empty = a webinar that lists this course in its own `courses` is used, if any. The older pasted `webinar_link` (a plain URL) still works, and only when no webinar is picked; the editor shows that box only while the course still has such a link.
 - `order`: lower numbers first. The first course is also what the header "Enroll Now" button opens.
 - `added`: date the course was added (`YYYY-MM-DD`). The home page shows the **2 newest** courses by this date; the Courses page shows all of them in a grid ordered by `order`. If `added` is missing, the file's modified time is used, so set it. The admin console fills it in automatically.
 - `published: false` hides a course without deleting its folder.
-- `coming_soon: true` (with `published: true`) announces a course that is not ready. It shows as a card in the **Coming Soon** section of the home and Courses pages (title, `subtitle`, `start_date` written as an expected time such as `Est. Q1 2027`, and the thumbnail or, without one, the `icon` emoji). It has no course page (its address goes to the Courses page), no Enroll button, and is left out of the main grid, the home featured cards, instructor profiles and webinar links. Only a `title` is needed. In the admin editor this is the **Status** choice (draft / coming soon / published); switching it to published moves the course to the main grid. The six placeholder cards that used to be typed into `app.py` were created once as ordinary coming-soon course folders (marker file `content/site/coming-soon-seeded.txt`); edit or delete them like any course.
+- `coming_soon: true` (with `published: true`) announces a course that is not ready. It shows as a card in the **Coming Soon** section of the home and Courses pages (title, `subtitle`, `start_date` written as an expected time such as `Est. Q1 2027`, and only the `icon` emoji, `✨` when empty: a coming-soon card never shows the thumbnail, it stays hidden until the course is published). It has no course page (its address goes to the Courses page), no Enroll button, and is left out of the main grid, the home featured cards, instructor profiles and webinar links. Only a `title` is needed. In the admin editor this is the **Status** choice (draft / coming soon / published); switching it to published moves the course to the main grid. The six placeholder cards that used to be typed into `app.py` were created once as ordinary coming-soon course folders (marker file `content/site/coming-soon-seeded.txt`); edit or delete them like any course.
 - Folders starting with `_` or `.` are ignored.
 
 `curriculum.csv` is **whatever sheet the instructor wrote**: any number of columns, any rows, any wording. The course page shows it exactly as it is, as a table: the first row becomes the table header, every other row is shown in its own order, and nothing is renamed, grouped or reinterpreted. Different instructors can lay their curriculum out differently.
@@ -310,7 +319,8 @@ A webinar lives in `content/webinars/<folder>/webinar.json` (plus an optional `c
 | Key | Meaning |
 |---|---|
 | `title` (required), `subtitle`, `description` | text; blank lines in the description make paragraphs |
-| `date` (`YYYY-MM-DD`), `time` (`HH:MM`, 24 h) | the **start** time, always **Bangladesh time (UTC+6)** |
+| `date` (`YYYY-MM-DD`), `time` (`HH:MM`, 24 h) | the **start** time, always **Bangladesh time (UTC+6)**. Both empty = "date to be announced" |
+| `tba` | `true` shows "Date to be announced (TBA)" instead of the date even when a date and time are stored (they are kept, just hidden; the join link does not open by itself). In the editor it is the **TBA** tickbox; untick it when the date is final |
 | `platform`, `capacity` | shown as facts; capacity is text only, nothing is enforced |
 | `join_link` | revealed on the page at the start time (never present in the page before that) |
 | `rsvp_link` | optional "let us know you're coming" link. Anyone can join without it; it is only a headcount |
@@ -322,9 +332,10 @@ A webinar lives in `content/webinars/<folder>/webinar.json` (plus an optional `c
 How it behaves:
 
 - A webinar only has a start time (nobody knows how long it will run), so there is no "ended" state. It shows **upcoming** until the start time, then **started** with the join link. It stays on the page **until you hide or delete it** in the admin; nothing is removed automatically. There are no recordings and no past list.
-- `/webinar` shows the soonest webinar with full details, then every later one as a single full-width notice line ("More details" opens the rest). Later lines carry no join or RSVP links; when one becomes the soonest it moves to the top and gets them. With none planned it says so.
+- `/webinar` shows the soonest webinar with full details, then every later one as a single full-width notice line ("More details" opens the rest). Later lines carry no join link (when one becomes the soonest it moves to the top and gets it) but do carry the **"Let us know you're coming"** button when `rsvp_link` is set. On the featured webinar that button is a solid gold, glowing button placed above the join note, so it cannot be missed. **Once a webinar has started the button disappears** everywhere (webinar page and home slider), since the headcount no longer matters. With none planned the page says so.
+- Webinars with `tba` (or no valid date) are listed last, show "TBA" in place of the date and are left out of the home slider.
 - The home hero is a slider: the brand slide first, then up to 3 webinar slides. With no webinar it is just the brand slide. It autoplays, and pauses on hover, keyboard focus and when the tab is hidden; no autoplay when the visitor prefers reduced motion.
-- A legacy `webinar_link` in a course's `meta.json` still wins over the linked webinar.
+- Which webinar a course page offers: the one picked in the course editor (`webinar`), else an old pasted `webinar_link`, else the soonest webinar that lists the course.
 - Restoring a webinar from the trash brings it back as a draft (hidden) until you tick **published**.
 
 #### Time

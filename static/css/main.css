@@ -1830,29 +1830,34 @@ a.team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(20
 }
 .wb-join { display: flex; align-items: center; gap: 0.5rem; width: 100%; justify-content: center; padding: 0.95rem 1.2rem; color: var(--nav); font-weight: 800; font-size: 1.05rem; box-shadow: 0 12px 30px rgba(245, 158, 11, 0.35); }
 
-/* optional headcount link: a gold-edged glass bar that fills on hover */
+/* headcount link: the loudest thing in the panel (solid gold, glowing ring), because it is the one action before the start */
 .wb-rsvp {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.8rem;
-    padding: 0.7rem 0.9rem;
+    padding: 0.85rem 1rem;
     border-radius: 1rem;
-    border: 1.5px solid rgba(251, 191, 36, 0.6);
-    background: rgba(251, 191, 36, 0.08);
-    color: #ffffff;
+    background: linear-gradient(135deg, #fde68a 0%, #fbbf24 55%, #f59e0b 100%);
+    color: var(--nav);
     text-decoration: none;
-    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55), 0 14px 32px rgba(245, 158, 11, 0.38);
+    animation: wb-rsvp-ring 2.6s ease-out infinite;
+    transition: transform 0.2s ease, filter 0.2s ease;
 }
-.wb-rsvp-ic { flex: none; width: 2.3rem; height: 2.3rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(251, 191, 36, 0.2); font-size: 1.1rem; }
+.wb-rsvp-ic { flex: none; width: 2.5rem; height: 2.5rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--nav); font-size: 1.25rem; }
 .wb-rsvp-tx { flex: 1; display: grid; line-height: 1.25; }
-.wb-rsvp-tx b { font-size: 0.98rem; }
-.wb-rsvp-tx small { font-size: 0.78rem; color: #cbd5e1; }
-.wb-rsvp-ar { font-weight: 800; color: #fbbf24; transition: transform 0.2s ease; }
-.wb-rsvp:hover { background: #fbbf24; border-color: #fbbf24; color: var(--nav); transform: translateY(-1px); }
-.wb-rsvp:hover .wb-rsvp-tx small, .wb-rsvp:hover .wb-rsvp-ar { color: var(--nav); }
+.wb-rsvp-tx b { font-size: 1.06rem; font-weight: 800; }
+.wb-rsvp-tx small { font-size: 0.78rem; font-weight: 600; color: rgba(20, 23, 83, 0.78); }
+.wb-rsvp-ar { flex: none; width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--nav); color: #fbbf24; font-weight: 800; transition: transform 0.2s ease; }
+.wb-rsvp:hover { transform: translateY(-2px); filter: brightness(1.05); animation-play-state: paused; }
 .wb-rsvp:hover .wb-rsvp-ar { transform: translateX(3px); }
-.wb-rsvp:hover .wb-rsvp-ic { background: rgba(20, 23, 83, 0.14); }
-.wb-rsvp:focus-visible, .wb-join:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
+@keyframes wb-rsvp-ring {
+    0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55), 0 14px 32px rgba(245, 158, 11, 0.38); }
+    70%, 100% { box-shadow: 0 0 0 14px rgba(251, 191, 36, 0), 0 14px 32px rgba(245, 158, 11, 0.38); }
+}
+@media (prefers-reduced-motion: reduce) { .wb-rsvp { animation: none; } }
+.wb-rsvp:focus-visible, .wb-join:focus-visible, .wb-rsvp-sm:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
 
 /* the later webinars: plain notice lines, no join area */
 .wb-later-title { margin: 0 0 1rem; color: var(--nav); }
@@ -1884,6 +1889,13 @@ a.team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(20
 .wb-stamp.tba b { font-size: 1.2rem; }
 .wb-row h3 { margin: 0; font-size: 1.2rem; color: var(--nav); }
 .wb-row .wb-sub { margin: 0.25rem 0 0; font-size: 1.05rem; }
+.wb-row-actions { margin: 0.7rem 0 0; }
+.wb-rsvp-sm {
+    display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.55rem 1.1rem; border-radius: 999px; line-height: 1.2;
+    background: #fbbf24; color: var(--nav); font-weight: 800; font-size: 0.92rem; text-decoration: none;
+    box-shadow: 0 6px 16px rgba(245, 158, 11, 0.3); transition: transform 0.2s ease, background 0.2s ease;
+}
+.wb-rsvp-sm:hover { background: var(--nav); color: #fbbf24; transform: translateY(-1px); }
 .wb-line { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.95rem; }
 .wb-more summary { margin-top: 0.5rem; color: var(--nav-strong); font-weight: 700; cursor: pointer; }
 
@@ -1898,6 +1910,7 @@ a.team-card:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(20
     .wb-feature-main .wb-desc { margin-top: 0; }
     .wb-row { grid-template-columns: 4.2rem minmax(0, 1fr); gap: 1rem; padding: 1rem; }
     .wb-stamp { width: 4.2rem; height: 4.2rem; }
+    .wb-rsvp-sm { font-size: 0.86rem; padding: 0.5rem 0.9rem; }
 }
 
 /* =====================================================================

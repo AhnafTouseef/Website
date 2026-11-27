@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}Practical Student Learning{% endblock %} · {{ site_name }}</title>
+    {% set page_title %}{{ seo.title or self.title()|striptags|trim }} · {{ site_name }}{% endset %}
+    <meta name="description" content="{{ seo.description }}" />
+    <link rel="canonical" href="{{ seo.url }}" />
+    <meta name="theme-color" content="#141753" />
+    <link rel="icon" type="image/svg+xml" href="{{ seo.icon }}" />
+    <meta property="og:site_name" content="{{ site_name }}" />
+    <meta property="og:type" content="{{ seo.kind }}" />
+    <meta property="og:title" content="{{ page_title }}" />
+    <meta property="og:description" content="{{ seo.description }}" />
+    <meta property="og:url" content="{{ seo.url }}" />
+    {% if seo.image %}<meta property="og:image" content="{{ seo.image }}" />{% endif %}
+    <meta name="twitter:card" content="{{ 'summary_large_image' if seo.image else 'summary' }}" />
+    <meta name="twitter:title" content="{{ page_title }}" />
+    <meta name="twitter:description" content="{{ seo.description }}" />
+    {% if seo.image %}<meta name="twitter:image" content="{{ seo.image }}" />{% endif %}
+    {% for block in seo.ld %}<script type="application/ld+json">{{ block|safe }}</script>
+    {% endfor %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}" />
     {% if custom_assets and custom_assets.css %}<link rel="stylesheet" href="{{ custom_assets.css }}" />{% endif %}

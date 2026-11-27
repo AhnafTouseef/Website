@@ -1,5 +1,5 @@
 from flask import (Flask, Blueprint, render_template, request, redirect, url_for,
-                   flash, abort, session, jsonify, Response, send_file, send_from_directory)
+                   flash, abort, session, jsonify, Response, send_file, send_from_directory, g)
 from markupsafe import Markup, escape
 import contextlib
 import csv
@@ -769,7 +769,8 @@ def _load_courses(soon):
             "discount": discount_label,
             "start_date": _text(meta.get("start_date")),
             "enroll_link": _text(meta.get("enroll_link")),
-            "webinar_link": _text(meta.get("webinar_link")),
+            "webinar": _text(meta.get("webinar")),                  # slug of a webinar picked in the course editor
+            "webinar_link": _text(meta.get("webinar_link")),        # older pasted link; still works when no webinar is picked
             "payment_instructions": _text(meta.get("payment_instructions")),
             "features": _text_list(meta.get("features")),
             "learn": _text_list(meta.get("what_you_will_learn")),
@@ -997,7 +998,7 @@ def _svg_headers(response):
 
 WEBINAR_DEFAULT_COVER = "webinar.jpg"
 WEBINAR_KEYS = ["title", "subtitle", "description", "date", "time", "platform", "join_link", "rsvp_link",
-                "capacity", "agenda", "speakers", "courses", "published", "cover_style"]
+                "capacity", "agenda", "speakers", "courses", "published", "cover_style", "tba"]
 TIME_RE = re.compile(r"^(?:[01]?\d|2[0-3]):[0-5]\d$")
 HERO_WEBINARS = 3                 # most webinar slides shown in the home slider (after the brand slide)
 
@@ -1051,7 +1052,8 @@ def _webinar_lookups():
 def _webinar_view(folder, data, path, now, lookups):
     """One webinar as the templates see it. `data` is the parsed webinar.json (cleaned here)."""
     date_text, time_text = _text(data.get("date")), _text(data.get("time"))
-    start = _webinar_start(date_text, time_text)
+    tba_flag = _is_true(data.get("tba"))
+    start = None if tba_flag else _webinar_start(date_text, time_text)      # an explicit TBA hides any stored date
     if start is None:
         status, starts_in, started_for = "tba", None, None
     elif now < start:
@@ -1079,6 +1081,7 @@ def _webinar_view(folder, data, path, now, lookups):
         "date": date_text if start else "",
         "time": time_text if start else "",
         "start": start,
+        "tba_flag": tba_flag,
         "status": status,
         "starts_in": starts_in,
         "started_for": started_for,
@@ -1447,9 +1450,104 @@ def load_branding():
     return brand
 
 
+# ---------------------------------------------------------------------------
+# Search and link-preview basics: <meta> description, canonical link, Open Graph / Twitter card tags, JSON-LD,
+# a favicon, /sitemap.xml and /robots.txt. Public pages only; the admin console is never listed or advertised.
+#
+#   SITE_URL          optional, e.g. https://skillwaves.example . Used for absolute links in tags and the sitemap.
+#                     Empty = the address the visitor used (correct behind a proxy that forwards the host).
+#   SITE_DESCRIPTION  optional default description (otherwise the home slide's text is used)
+#
+# A route calls set_seo(...) to describe its page; anything it leaves out falls back to the site default.
+# ---------------------------------------------------------------------------
+
+SITE_URL = os.environ.get("SITE_URL", "").strip().rstrip("/")
+SITE_DESCRIPTION = os.environ.get("SITE_DESCRIPTION", "").strip()
+
+
+def _site_root():
+    return SITE_URL or request.url_root.rstrip("/")
+
+
+def _abs_url(url):
+    if not url or re.match(r"https?://", url, re.I):
+        return url or ""
+    return _site_root() + (url if url.startswith("/") else "/" + url)
+
+
+def _snippet(text, limit=160):
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:.-")
+    return (cut or text[:limit - 1]) + "…"
+
+
+def set_seo(description=None, image=None, title=None, kind=None, ld=None):
+    """Describe the page being rendered (any argument may be left out)."""
+    g.seo = {"description": _snippet(description) if description else "", "image": image or "", "title": title or "",
+             "kind": kind or "", "ld": ld or []}
+
+
+def _seo_tags(brand):
+    page = getattr(g, "seo", None) or {}
+    description = page.get("description") or _snippet(SITE_DESCRIPTION or brand["slide"]["text"] or brand["slide"]["headline"])
+    image = page.get("image") or brand["slide"].get("image_url") or brand["header"].get("url") or ""
+    ld = []
+    for block in page.get("ld") or []:
+        ld.append(json.dumps(block, ensure_ascii=False).replace("<", "\\u003c"))
+    return {
+        "description": description,
+        "image": _abs_url(image),
+        "url": _site_root() + request.path,
+        "kind": page.get("kind") or "website",
+        "title": page.get("title"),
+        "ld": ld,
+        "icon": url_for("favicon"),
+    }
+
+
 @app.context_processor
 def site_context():
-    return {"brand": load_branding(), "asset": asset_url, "site_name": SITE_NAME}
+    brand = load_branding()
+    seo = _seo_tags(brand) if request.blueprint != "admin" else {}
+    return {"brand": brand, "asset": asset_url, "site_name": SITE_NAME, "seo": seo}
+
+
+def _favicon_svg():
+    letter = escape((SITE_NAME[:1] or "S").upper())
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#141753"/>'
+            f'<text x="32" y="45" font-family="Arial, Helvetica, sans-serif" font-size="38" font-weight="700" fill="#fbbf24" text-anchor="middle">{letter}</text></svg>')
+
+
+@app.route("/favicon.svg")
+def favicon():
+    response = Response(_favicon_svg(), mimetype="image/svg+xml")
+    response.headers["Cache-Control"] = "public, max-age=86400"
+    return response
+
+
+@app.route("/favicon.ico")
+def favicon_ico():
+    return redirect(url_for("favicon"), code=301)
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    lines = ["User-agent: *", "Allow: /", "Disallow: /suggest", "Disallow: /course/*/enroll",
+             "", f"Sitemap: {_site_root()}/sitemap.xml", ""]
+    return Response("\n".join(lines), mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    paths = [url_for(n) for n in ("home", "courses", "webinar", "team", "faq")]
+    paths += [url_for("course_details", slug=c["slug"]) for c in load_courses()]
+    paths += [url_for("instructor_profile", slug=p["slug"]) for p in load_instructors()]
+    body = "".join(f"  <url><loc>{escape(_site_root() + path)}</loc></url>\n" for path in dict.fromkeys(paths))
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           + body + "</urlset>\n")
+    return Response(xml, mimetype="application/xml")
 
 
 # ---------------------------------------------------------------------------
@@ -1762,6 +1860,9 @@ def contact_context():
 def home():
     webinars = [w for w in load_webinars() if w["start"]][:HERO_WEBINARS]
     people = load_instructors()
+    logo = load_branding()["header"]["url"]
+    set_seo(ld=[{"@context": "https://schema.org", "@type": "Organization", "name": SITE_NAME, "url": _site_root() + "/",
+                 **({"logo": _abs_url(logo)} if logo else {})}])
     return render_template(
         "home.html",
         founders=[p for p in people if p["founder"]],
@@ -1773,6 +1874,9 @@ def home():
     )
 
 def _courses_page(idea=None, status=200):
+    open_titles = [c["title"] for c in load_courses()]
+    set_seo(title="Courses", description=("Open courses: " + ", ".join(open_titles) + ". Practical, project-based learning at a fair price.")
+            if open_titles else "See what we teach and which courses are coming next.")
     if idea is None:
         idea = {k: "" for k in ("name", "email", "message")}
         session["idea_ts"] = time.time()
@@ -1853,8 +1957,24 @@ def course_details(slug):
             if any(c["slug"] == slug for c in load_coming_soon()):     # announced, not open yet: no page of its own
                 return redirect(url_for("courses", _anchor="coming-soon"))
             abort(404)
-    linked = webinars_for_course(course["slug"], load_webinars())
-    return render_template("course_details.html", course=course, linked_webinar=(linked[0] if linked else None))
+    set_seo(title=course["title"], kind="article",
+            description=course["description"] or course["subtitle"] or course["tagline"] or course["title"],
+            image=(url_for("media", filename=course["thumbnail"]) if course["thumbnail"] else None),
+            ld=[{"@context": "https://schema.org", "@type": "Course", "name": course["title"],
+                 "description": _snippet(course["description"] or course["subtitle"] or course["title"], 300),
+                 "url": _site_root() + url_for("course_details", slug=course["slug"]),
+                 "provider": {"@type": "Organization", "name": SITE_NAME, "url": _site_root() + "/"}}])
+    webinars = load_webinars()
+    # Which webinar to offer: the one picked in the course editor, else an old pasted link, else a webinar that lists this course.
+    picked = next((w for w in webinars if course["webinar"] and w["slug"] == course["webinar"]), None)
+    if picked is not None:
+        linked = picked
+    elif course["webinar_link"]:
+        linked = None
+    else:
+        reverse = webinars_for_course(course["slug"], webinars)
+        linked = reverse[0] if reverse else None
+    return render_template("course_details.html", course=course, linked_webinar=linked)
 
 @app.route("/instructor/<slug>")
 def instructor_profile(slug):
@@ -1863,11 +1983,29 @@ def instructor_profile(slug):
     if person is None:
         abort(404)
     taught = [c for c in load_courses() if any(i.get("slug") == slug for i in c["instructors"])]
+    set_seo(title=person["name"], kind="profile", description=person["bio"] or ((person["role"] + " at " + SITE_NAME) if person["role"] else person["name"]),
+            image=(url_for("media", filename=person["photo"]) if person["photo"] else None))
     return render_template("instructor.html", person=person, courses=assign_tints(taught))
 
 @app.route("/webinar")
 def webinar():
     items = load_webinars()
+    top = items[0] if items else None
+    if top:
+        about = top["subtitle"] or (top["paragraphs"][0] if top["paragraphs"] else "") or "A short live session with our instructors."
+        page_url = _site_root() + url_for("webinar")
+        event = []
+        if top["start"] is not None:
+            event = [{"@context": "https://schema.org", "@type": "Event", "name": top["title"],
+                         "description": _snippet(about, 300), "startDate": top["start"].isoformat(),
+                         "eventStatus": "https://schema.org/EventScheduled",
+                         "eventAttendanceMode": "https://schema.org/OnlineEventAttendanceMode",
+                         "location": {"@type": "VirtualLocation", "url": page_url},
+                         "organizer": {"@type": "Organization", "name": SITE_NAME, "url": _site_root() + "/"}}]
+        set_seo(title="Webinars", description=f"{top['title']}: {top['when_label']}. {about}",
+                image=(url_for("media", filename=top["cover"]) if top["has_cover"] else None), ld=event)
+    else:
+        set_seo(title="Webinars", description="Short live sessions where you can see how we teach and ask your questions. No webinar is planned right now.")
     return render_template("webinar.html", featured=(items[0] if items else None), later=items[1:])
 
 @app.route("/team")
@@ -1877,6 +2015,7 @@ def team():
     founders = [p for p in people if p["founder"]]
     others = assign_tints([p for p in people if not p["founder"]])
     course_count = len(load_courses())
+    set_seo(title="Our team", description="Meet the people who teach and build " + SITE_NAME + ": " + ", ".join(p["name"] for p in people[:6]) + ".")
     return render_template("team.html", founders=founders, instructors=others,
                            people_count=len(people), course_count=course_count)
 
@@ -2433,7 +2572,7 @@ def _set_visitor_cookie(response, vid):
 def _remember_first_visit():
     """Remember, in the visitor's session cookie, where they first came from (referring site, campaign tags in
     the link, first page). A message sent later carries that, which tells us which ads and posts bring students."""
-    if request.method != "GET" or request.blueprint == "admin" or request.endpoint in (None, "static", "media", "custom_css", "custom_js"):
+    if request.method != "GET" or request.blueprint == "admin" or request.endpoint in (None, "static", "media", "custom_css", "custom_js", "favicon", "favicon_ico", "robots_txt", "sitemap_xml"):
         return
     utm = _campaign_tags()
     ft = session.get("ft")
@@ -2602,6 +2741,7 @@ def _build_message(form):
 
 @app.route("/faq", methods=["GET", "POST"])
 def faq():
+    set_seo(title="FAQ", description="Answers to common questions about our courses, payment and webinars, and a way to ask us your own.")
     form = {k: "" for k in ("name", "email", "message")}
     if request.method == "POST":
         form = {k: request.form.get(k, "").strip() for k in form}
@@ -2680,7 +2820,7 @@ TRASH_INSTRUCTOR_PREFIX = "instructor--"      # course slugs never contain "--",
 TRASH_RE = re.compile(r"^(?P<slug>[^/\\\x00]+?)__(?P<ts>\d{8}-\d{6})(?:-\d+)?$")
 
 STRING_KEYS = ["title", "tagline", "subtitle", "description", "duration", "capacity",
-               "certificate", "price", "start_date", "enroll_link", "webinar_link", "payment_instructions", "icon"]
+               "certificate", "price", "start_date", "enroll_link", "webinar", "webinar_link", "payment_instructions", "icon"]
 LIST_KEYS = ["features", "what_you_will_learn", "instructors"]
 META_KEYS = STRING_KEYS + LIST_KEYS + ["discount", "order", "added", "published", "coming_soon", "thumb_style"]
 
@@ -3012,6 +3152,10 @@ def scan_courses():
                 add("warn", "no title; the folder name is used instead")
             if not _text(meta.get("enroll_link")) and not soon:
                 add("warn", "no enroll_link; the Enroll buttons are hidden")
+            if _text(meta.get("webinar")) and not os.path.isfile(os.path.join(_webinars_dir(), _text(meta.get("webinar")), "webinar.json")):
+                add("warn", f"webinar '{_text(meta.get('webinar'))}' no longer exists, so no webinar is linked from this course")
+            if _text(meta.get("webinar_link")) and _text(meta.get("webinar")):
+                add("info", "webinar_link (a pasted link) is ignored while a webinar is picked")
             for key in ("enroll_link", "webinar_link"):
                 value = _text(meta.get(key))
                 if value and not URL_RE.match(value):
@@ -3992,6 +4136,8 @@ def _read_submission(creating, existing_meta, added_default):
     for key in ("enroll_link", "webinar_link"):
         if form[key] and not URL_RE.match(form[key]):
             errors.append(f"{key} must start with http:// or https:// (or be left empty).")
+    if form["webinar"] and not os.path.isfile(os.path.join(_webinars_dir(), form["webinar"], "webinar.json")):
+        errors.append("The webinar you picked no longer exists. Choose another one or “none”.")
     if len(form["payment_instructions"]) > CONTACT_LIMITS["payment_instructions"]:
         errors.append(f"Payment instructions are too long (the limit is {CONTACT_LIMITS['payment_instructions']} characters).")
     if form["added"] and not _valid_date(form["added"]):
@@ -4115,8 +4261,16 @@ def _editor(slug):
 
     known = {_norm(p["name"]) for p in instructors}
     extra = [n for n in form["instructors"] if _norm(n) not in known]
+    webinar_options = []
+    for w in scan_webinars():
+        if w["status"] == "broken":
+            continue
+        label = w["title"] + " · " + (w["when"] or "Date to be announced") + (" (hidden)" if w["status"] == "hidden" else "")
+        webinar_options.append({"slug": w["slug"], "label": label})
+    if form["webinar"] and form["webinar"] not in {o["slug"] for o in webinar_options}:
+        webinar_options.append({"slug": form["webinar"], "label": form["webinar"] + " (not found)"})
     return render_template(
-        "admin_edit.html",
+        "admin_edit.html", webinar_options=webinar_options,
         creating=creating, slug=slug, form=form, errors=errors, load_error=load_error,
         instructors=instructors, extra_instructors=extra,
         thumb=(f"course/{slug}/{thumb}" if thumb else None),
@@ -4743,7 +4897,9 @@ def scan_webinars():
         unknown = [k for k in data if k not in WEBINAR_KEYS]
         if unknown:
             issues.append({"level": "info", "text": "unknown key(s) ignored by the site: " + ", ".join(f"'{k}'" for k in unknown)})
-        if (_text(data.get("date")) or _text(data.get("time"))) and view["start"] is None:
+        if view["tba_flag"] and (_text(data.get("date")) or _text(data.get("time"))):
+            issues.append({"level": "info", "text": "marked 'date to be announced', so the stored date and time are not shown"})
+        elif (_text(data.get("date")) or _text(data.get("time"))) and view["start"] is None:
             issues.append({"level": "warn", "text": "date or time is not valid (use YYYY-MM-DD and HH:MM), so it is shown as 'date to be announced'"})
         if _text(data.get("join_link")) and not view["join_link"]:
             issues.append({"level": "warn", "text": "join link is not a web address, so it is not shown"})
@@ -4786,6 +4942,7 @@ def _webinar_form_from_data(data, slug):
         "agenda": agenda,
         "speakers": _text_list(data.get("speakers")), "courses": _text_list(data.get("courses")),
         "published": not _is_false(data.get("published", True)) if data else False,
+        "tba": _is_true(data.get("tba")),
         "cover_style": clean_img_style(data.get("cover_style"), "cover"),
     }
 
@@ -4801,6 +4958,7 @@ def _read_webinar_submission(creating, existing):
         "speakers": [s.strip() for s in f.getlist("speakers") if s.strip()],
         "courses": [s.strip() for s in f.getlist("courses") if s.strip()],
         "published": f.get("published") == "on",
+        "tba": f.get("tba") == "on",
     }
     form["cover_style"] = read_img_style(f, "cover", "cover", errors, "Cover picture")
     if creating:
@@ -4818,9 +4976,9 @@ def _read_webinar_submission(creating, existing):
         errors.append("Date is not valid.")
     if form["time"] and not TIME_RE.match(form["time"]):
         errors.append("Time is not valid (use HH:MM, e.g. 10:00).")
-    if form["date"] and not form["time"]:
+    if form["date"] and not form["time"] and not form["tba"]:
         errors.append("Add the start time too: the join link opens at that moment. Leave both empty for 'date to be announced'.")
-    if form["time"] and not form["date"]:
+    if form["time"] and not form["date"] and not form["tba"]:
         errors.append("Add the date too, or clear the time.")
     for key, label in (("join_link", "Join link"), ("rsvp_link", "Registration link")):
         cleaned, why = clean_url(form[key])
@@ -4857,6 +5015,8 @@ def _read_webinar_submission(creating, existing):
     if form["courses"]:
         out["courses"] = form["courses"]
     out["published"] = form["published"]
+    if form["tba"]:
+        out["tba"] = True
     store_img_style(out, "cover_style", form["cover_style"], "cover")
     return form, {"data": out, "slug": form["slug"], "cover": cover, "remove_cover": f.get("remove_cover") == "on"}, []
 
@@ -4917,6 +5077,8 @@ def _state_note(view):
         return "Starts in " + _span_label(view["starts_in"]) + ". The join link stays hidden until then."
     if view["status"] == "started":
         return "Started " + _span_label(view["started_for"]) + " ago. It stays on the site until you hide or delete it."
+    if view.get("tba_flag"):
+        return "Marked TBA: visitors see 'date to be announced'; the stored date and time are hidden until you untick it."
     return "No date yet, so it is listed last as 'date to be announced'."
 
 
